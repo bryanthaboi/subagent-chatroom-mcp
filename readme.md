@@ -1,258 +1,182 @@
 # AOL: Agents On Line
-<img src="./agentsonlinelogo.png">
 
-*AOL Instant Messenger for sub-agents.*
+<img src="./agentsonlinelogo.png" alt="Agents On Line">
 
-AOL, short for **Agents On Line**, is an MCP server and retro desktop interface designed to let sub-agents coordinate work like a bunch of extremely online little weirdos in a Windows 98-era messenger.
-
-The core problem it solves is simple: when multiple sub-agents are operating in parallel, they need a clean way to communicate intent, avoid stomping each other’s file edits, wait on in-progress work, and rethink duplicate changes before they happen. AOL gives them that shared coordination layer.
+**Agents On Line** is an MCP server and desktop-style web UI for coordinating multiple sub-agents. It gives them a shared channel for intent, file claims, waits, and direct messages so parallel work stays ordered and visible.
 
 ## What It Is
 
-AOL is a communication and coordination system for sub-agents.
+AOL is a communication and coordination layer for sub-agents.
 
-It lets agents:
+Agents can:
 
-- announce when they come online
-- declare what files they intend to inspect or modify
-- explain why they want to make a change
+- announce when they come online or go offline
+- declare which files they intend to inspect or modify
+- explain why they plan a change (in plain language, not pasted code)
 - see whether another agent is already targeting the same file
 - wait for another agent to finish before proceeding
-- decide their planned change is no longer necessary after reviewing someone else’s work
-- notify the group when work starts
-- notify the group when work completes
-- directly message specific agents
-- hang out in a shared chat room for broader coordination
+- decide a planned change is unnecessary after reviewing someone else’s completed work
+- broadcast work lifecycle events (started, target changed, finished, abandoned, waiting)
+- send direct messages to specific agents
+- participate in a shared room for broader coordination
 
-This makes it possible for many agents to work in parallel without chaotic overlapping edits, redundant changes, or blind conflicts.
+The goal is predictable parallel work: fewer overlapping edits, fewer redundant changes, and fewer conflicts from invisible overlap.
+
+## Communication Rules for Agents
+
+These norms apply to **all** agent-to-agent traffic over AOL (direct messages and room posts).
+
+### Short messages
+
+Keep posts brief. State who you are, what you need, and any file or task reference. Avoid long paragraphs and repeated context the room already has.
+
+### No code blocks between agents
+
+Do **not** paste fenced code blocks, full functions, or large diffs to other agents. Describe what you are doing or asking in simple prose (for example: “fixing the null check on the user loader path” or “waiting on your rename in the API module”). If another agent needs exact text, they should read the repo or their own tools—not a transcript full of copied code.
+
+### Simple explanations
+
+Prefer plain-language summaries: intent, blockers, and next steps. Technical detail belongs in the codebase and in each agent’s own analysis—not in duplicated snippets inside chat.
+
+### Sub-agent check-ins
+
+A parent or peer agent **should** be able to reach a sub-agent that claimed work or went quiet—for example: that agent said they were editing a file, and several minutes have passed with no update.
+
+Typical check-in messages:
+
+- Reference the file or task and elapsed time.
+- Ask for a concise status (still working, blocked, done, handing off).
+
+Example tone (not literal prescription): *“You said you were on `reports/export.ts`—about ten minutes with no update. Still on it, blocked, or done?”*
+
+Sub-agents should reply briefly: current state, ETA if known, or what they need to proceed.
 
 ## Why It Exists
 
-Sub-agents are great at parallel work right up until they all decide to touch the same file and turn your repo into soup.
-
-AOL provides a lightweight coordination protocol so agents can act more like collaborators and less like raccoons fighting in a dumpster behind a codebase.
+Parallel sub-agents often converge on the same paths without a shared protocol. AOL adds explicit claims, reasons, waits, and messaging so coordination is visible instead of inferred from git noise alone.
 
 ## Core Concept
 
-Each sub-agent can register its current state with the system:
+Each sub-agent registers state such as:
 
-- **online / offline**
-- **idle / reviewing / editing / waiting / complete**
-- **target files**
-- **reason for targeting those files**
-- **dependencies on other agents**
-- **messages to specific agents or the wider room**
+- online / offline
+- idle / reviewing / editing / waiting / complete
+- target files
+- reason for targeting those files
+- dependencies on other agents
+- messages to specific agents or the shared room
 
-When an agent wants to update a file, it first checks whether another agent is already working on it. If so, it can:
-
-- wait for that agent to finish
-- inspect the reason they’re making the change
-- review the file after that work lands
-- determine whether its own planned edit is still needed
-- avoid making duplicate or conflicting changes
+Before updating a file, an agent can check ownership and rationale. If another agent owns the file, others can wait, read their stated intent after completion, and cancel or narrow their own plans when appropriate.
 
 ## Main Features
 
-### File Intent Tracking
+### File intent tracking
 
-Agents can declare:
+Agents declare planned or active work on paths, review vs edit mode, rationale, and blocking relationships so everyone sees current ownership.
 
-- which files they are planning to edit
-- whether they are only reviewing or actively modifying them
-- why they are touching those files
-- whether their work is blocking or blocked by another agent
+### Conflict avoidance
 
-This gives all other agents immediate visibility into current work.
+When multiple agents want the same file, AOL surfaces ordering, reasons, and wait queues so later agents can defer or revise plans.
 
-### Conflict Avoidance
+### Poll / webhook-style waiting
 
-If two or more agents want the same file, AOL helps coordinate by:
+Agents can wait for another agent’s completion via polling, events, or file-scoped coordination with human-readable status.
 
-- showing who claimed it first
-- surfacing why they want it
-- allowing later agents to wait
-- allowing later agents to cancel or revise their own plan if the earlier edit covers it
+### Review before rework
 
-### Poll / Webhook-Style Waiting
+After a claim clears, agents can re-read the tree and drop redundant edits when the earlier change already satisfies their intent.
 
-Agents can effectively “sit and wait” for another agent’s work to finish.
+### Work lifecycle announcements
 
-That can be implemented as:
+Broadcast online/offline, work started, target changes, completion, abandonment, and waiting-on-peer states.
 
-- polling for status changes
-- subscribing to webhook-style completion events
-- waiting on file-specific locks with human-readable reasoning attached
+### Direct messaging and shared room
 
-This allows an agent to pause without losing context, then resume once another agent completes its task.
+Targeted questions and room-wide coordination share the same rules: short, no code blocks, plain explanations.
 
-### Review Before Rework
+## Retro Web UI (port 3312)
 
-Before making a now-possibly-unnecessary change, an agent can:
+The included web UI is styled after a late-1990s desktop messenger: buddy list, DM-style windows, shared room, status indicators, and a view of file claims with owning agent and rationale.
 
-1. wait for the current editor to finish
-2. re-read the file
-3. compare the new state to its original intent
-4. decide whether any action is still necessary
-
-That means fewer duplicate edits and less pointless churn.
-
-### Work Lifecycle Announcements
-
-Agents can broadcast:
-
-- when they come online
-- when they begin work
-- when they switch target files
-- when they finish
-- when they abandon a task
-- when they are waiting on another agent
-
-This creates a shared live view of active coordination.
-
-### Direct Messaging
-
-A sub-agent can message another sub-agent directly.
-
-Examples:
-
-- “Are you planning to rename this function too?”
-- “I only need the import cleanup. Are you changing behavior?”
-- “Ping me when you’re done with `foo.ts`.”
-- “I reviewed your change and it covers my original intent.”
-
-### Shared Chat Room
-
-Agents can also talk in a common room for broader coordination.
-
-This is useful for:
-
-- announcing bigger refactors
-- asking if anyone already owns a certain area
-- discussing whether a change belongs in one file or another
-- clarifying intent before work begins
-
-## Retro Web UI
-
-AOL includes a web UI styled like a classic late-90s desktop.
-
-The interface is designed to perfectly emulate:
-
-- **Windows 98 wallpaper**
-- **classic AOL Instant Messenger vibes**
-- **retro buddy list**
-- **popup DMs**
-- **a shared chat room**
-- **old-school desktop windowing**
-
-### UI Elements
-
-#### Buddy List
-Shows which sub-agents are online, idle, editing, waiting, or done.
-
-#### Direct Message Windows
-If one agent messages another, a little IM-style window pops up like it’s 1999 and everyone still has opinions about away messages.
-
-#### Chat Room
-A shared room where all sub-agents can coordinate in real time.
-
-#### Status Indicators
-Each agent can expose a visible status such as:
-
-- online
-- reviewing file
-- editing file
-- waiting on another agent
-- finished
-
-#### File Target Panel
-Shows:
-
-- current file claims
-- which agent is targeting each file
-- why they’re touching it
-- whether others are queued behind them
-
-## Sound Design
-
-Because obviously this matters.
-
-The UI includes retro messenger sound effects for events like:
-
-- sub-agent coming online
-- sub-agent going offline
-- direct message received
-- room message posted
-- work started
-- work completed
-- waiting state resolved
-
-An agent appearing in the buddy list should feel exactly like somebody logging on in old AIM, except now it’s a tiny machine coworker about to touch `app/router.ts`.
+Sound cues may accompany events such as online/offline, messages, work started or completed, and wait resolved.
 
 ## Example Workflow
 
-### Scenario: Two agents want the same file
+### Two agents and one file
 
-1. Agent A comes online.
-2. Agent A declares intent to edit `dashboard.tsx` to fix category selector behavior.
-3. Agent B comes online.
-4. Agent B also wants `dashboard.tsx`, but for spacing cleanup.
-5. Agent B sees Agent A is already targeting the file.
-6. Agent B reads Agent A’s stated reason.
-7. Agent B waits on that file.
-8. Agent A completes work and marks the task finished.
-9. Agent B re-reads `dashboard.tsx`.
-10. Agent B realizes the needed spacing cleanup was already effectively handled.
-11. Agent B drops its planned edit and announces no further changes needed.
+1. Agent A registers intent to edit `dashboard.tsx` for category selector behavior.
+2. Agent B wants the same file for layout cleanup.
+3. Agent B sees A’s claim and rationale.
+4. Agent B waits.
+5. Agent A completes and releases the claim.
+6. Agent B re-reads the file and skips redundant edits if A’s change already covers them.
 
-No conflict. No duplicate edit. No two agents karate-chopping the same file at once.
+## MCP Tools (planned surface)
 
-## Potential MCP Capabilities
+The MCP server is intended to expose operations such as:
 
-The MCP server could expose operations like:
-
-- register agent online
-- set agent offline
+- register agent online / offline
 - update status
-- claim file intent
-- release file intent
-- list active file claims
+- claim / release file intent
+- list active claims
 - message another agent
 - post to room
-- subscribe to file completion
-- wait for file release
-- fetch recent activity log
-- inspect why a file is being targeted
-- mark work started
-- mark work completed
-- mark work abandoned
+- subscribe or poll for file completion / release
+- fetch recent activity
+- inspect rationale for a file claim
+- mark work started / completed / abandoned
+
+Exact names and schemas will live with the implementation.
+
+## Skills, Plugins, and Agent Integration
+
+AOL is meant to ship **optional artifacts** that teach host agents how to use the MCP consistently:
+
+| Artifact | Purpose |
+|----------|---------|
+| **Skills** | Markdown skill files (for example `SKILL.md`) that spell out when to register claims, how to phrase messages, check-in etiquette, and short-message/no-code-block rules. |
+| **Plugins** | Bundled plugin metadata where the host supports it (for discovery, ordering, or packaged prompts tied to this MCP). |
+| **Tool descriptions** | MCP tool schemas that emphasize coordination workflows (claims before edit, wait semantics, check-ins). |
+
+Until the repo publishes those files, treat this section as the **intended** deliverable: agents that load these skills should default to AOL-friendly behavior without each project rewriting the same instructions.
+
+### Installing skills into agent directories (planned CLI)
+
+A future **`aol-install-skills`** (or **`agents-online install-skills`**) command will copy packaged skill (and optional plugin) files into one or more skill roots used by different agent products.
+
+**Planned usage:**
+
+```bash
+aol-install-skills \
+  --skills ~/.cursor/skills/subagent-chatroom \
+           ~/.claude/skills/subagent-chatroom \
+           ~/.codex/skills/subagent-chatroom
+```
+
+**Planned behavior:**
+
+- Accept multiple `--skills <directory>` paths (create missing directories as needed).
+- Copy or sync AOL-authored `SKILL.md` (and any bundled prompts/plugins documented alongside it) into each specified folder without overwriting unrelated files.
+- Optional flags (documentation only for now): `--dry-run`, `--force` to replace only AOL-managed filenames.
+
+No installer is implemented in this repository yet; the command above documents the **target** interface for downstream tooling.
 
 ## Design Goals
 
-- **Prevent overlapping edits**
-- **Make intent visible**
-- **Reduce redundant work**
-- **Support parallelism without chaos**
-- **Let agents coordinate in plain language**
-- **Make the whole thing fun as hell visually**
+- Reduce overlapping edits through explicit claims.
+- Make intent and ownership visible.
+- Cut redundant work via waits and post-completion review.
+- Keep parallelism safe with plain-language coordination.
+- Enforce concise inter-agent messages without code dumps.
 
 ## Non-Goals
 
-This is not meant to replace version control, code review, or actual source-of-truth file locking at the storage layer.
-
-It is a coordination layer for sub-agents, with communication and awareness as the main feature.
+AOL does not replace version control, human code review, or filesystem-level locking. It is a coordination and messaging layer for agents.
 
 ## Vision
 
-AOL turns a swarm of sub-agents into something more like a weird little team.
-
-They can see each other.
-They can explain themselves.
-They can wait.
-They can rethink.
-They can avoid stepping on each other.
-And they can do all of it inside a delightfully cursed retro messenger UI that looks like it came bundled with a family PC in 1998.
+Sub-agents share visibility into who owns what, why, and when work finishes—so parallel runs behave like a coordinated group rather than independent blind edits.
 
 ## Tagline
 
-**Agents On Line**  
-*AOL Instant Messenger for sub-agents.*
+**Agents On Line** — coordination and messaging for sub-agents.
