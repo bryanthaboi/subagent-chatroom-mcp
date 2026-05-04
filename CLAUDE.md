@@ -2,59 +2,94 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What this repo currently is
+## What this repo is
 
-A **single-page UI prototype** of "AOL — Agents On Line", styled as a late-90s desktop messenger. It is the visual / interaction mock for an MCP server that coordinates parallel sub-agents (file-claim tracking, DMs, chatroom, activity log).
+The **AOL — Agents On Line** MCP server, daemon, and retro web UI. Agents
+register with a `repoPath`, get grouped into a folder per repo in the buddy
+list, and coordinate via per-repo chat rooms, DMs, and file claims.
 
-The MCP server itself does **not exist yet** — the README describes the *intended* tool surface (`register agent`, `claim/release file`, `message`, etc.) and a planned `aol-install-skills` CLI, but no server code, package manifest, build step, or test suite is checked in. The "About" panel even says the MCP is *pretend-running* on `:7331`. When asked to implement MCP tools, treat the README as a spec, not as documentation of existing code.
+The daemon is implemented in TypeScript and listens on port **3312** for both
+the UI (static + SSE) and the REST API. The MCP server is a thin stdio shim
+that forwards tool calls to the daemon over HTTP and auto-spawns the daemon if
+it's not already running.
+
+> Earlier revisions of this repo were a single-page UI mockup with a scripted
+> demo. That mockup is now wired to the real backend; the scripts and fake
+> agents are gone. The UI files in `public/` are still JSX transformed in the
+> browser by `@babel/standalone` — no bundler.
+
+## Layout
+
+```
+src/
+  daemon/         # HTTP server, state, SSE, REST routes
+  mcp/            # @modelcontextprotocol/sdk stdio server (tool surface)
+  cli/            # `aol` CLI: start/stop/status/install-skills/agent
+  shared/         # types + AolClient (HTTP client used by both MCP and CLI)
+public/           # served at :3312 — index.html + 3 .jsx files + retro.css + logo
+skills/           # `aol-coordination/SKILL.md` — installable into agent skill dirs
+service/          # macOS launchd plist template
+scripts/          # install-service.sh / uninstall-service.sh
+tests/            # vitest — state + server integration tests
+```
 
 ## Running it
 
-There is no build, no `npm install`, no tests. To use the UI, open `Agents Online.html` in a browser. JSX is transformed in-browser by `@babel/standalone`, so editing a `.jsx` file just needs a reload — no bundler.
-
-If `file://` blocks something (e.g. font/image loads), serve the directory:
-
 ```bash
-python3 -m http.server 3312
-# then open http://localhost:3312/Agents%20Online.html
+pnpm install
+pnpm build          # tsc → dist/
+pnpm start          # detached daemon on 127.0.0.1:3312, pid → ~/.aol/daemon.pid
+pnpm status
+pnpm stop
+pnpm kill
+pnpm restart
+pnpm test
 ```
 
-The README mentions port 3312 as the intended UI port, but nothing in the code binds to it — it's just a convention for the static server.
+For local UI dev: `pnpm dev` runs the daemon via `tsx` in the foreground; edit
+`public/*.jsx` and reload the browser.
 
-## Architecture
+For service-on-login (macOS): `pnpm run service:install` /
+`pnpm run service:uninstall`. Full instructions in [DEPLOY.md](./DEPLOY.md).
 
-Three JSX files are loaded in order by `Agents Online.html` and communicate **only through globals on `window`**. There are no ES module imports.
+## Architecture rules
 
-1. `aol-core.jsx` — exports `window.AOL_DATA` containing:
-   - `AGENTS`, `YOU` — the cast of fake agents
-   - `INITIAL_STATES` — starting lifecycle state per agent (`editing` / `reviewing` / `waiting` / `idle` / `complete` / `offline`) plus `file` and `reason`
-   - `ROOM_SCRIPT`, `DM_SCRIPTS` — canned message timelines that play back over time
-   - `AudioFx` — synthesized retro chimes (no sampled audio); `signon`, `knock`, `msg`, `workStart`, `workDone`, etc.
-   - `Win` — generic draggable/resizable window component
-   - `Icon` — inline-SVG pixel icons
-2. `aol-windows.jsx` — exports `window.AOL_WINDOWS` (`BuddyList`, `ChatRoom`, `DMWindow`, `FileTargets`, `ActivityLog`, `About`). Depends on `AOL_DATA`.
-3. `aol-app.jsx` — top-level `App` + `SignOn`, mounts via `ReactDOM.createRoot`. Owns all state (window z-order, open DMs, chat log, agent states, activity events) and orchestrates the demo via two `useEffect` loops:
-   - **Chatter loop** — walks `ROOM_SCRIPT` with randomized delays, scaled by `chatterSpeed`.
-   - **Lifecycle transitions** — a fixed `transitions` array of `[delayMs, fn]` pairs that flip agent statuses to fake completions, claim handoffs, and the README's "review-before-rework" example (`pixel_pat` → `dashboard_dee` drops her edit).
+- **State lives in the daemon.** MCP processes and the UI are clients.
+- **Agents are scoped by `repoPath`.** Buddy list folders, chat rooms, file
+  claims, and activity logs are keyed on this. When adding a new feature,
+  default to per-repo scoping.
+- **MCP and CLI both go through `AolClient`** in `src/shared/client.ts`. Don't
+  duplicate fetch logic.
+- **The MCP server should remain thin.** Business logic belongs in
+  `src/daemon/state.ts`. The MCP layer just translates schemas to HTTP.
+- **The UI talks to the daemon over fetch + SSE only.** No direct globals
+  injected from the server side; everything React reads comes from
+  `AolNet.subscribe()` events or initial REST loads.
 
-If you add a new shared helper, attach it to `window.AOL_DATA` (or a new namespace) — anything else won't be visible across files.
+## Inter-agent communication norms (load-bearing)
 
-## Demo is scripted, not reactive
+These are product requirements, not stylistic preferences:
 
-Everything you see in motion is hardcoded: the room transcript, IM replies, and the agent lifecycle. There is no real backend, no event bus, no polling. When changing demo behavior, edit:
+- **Short messages**, no fenced code blocks between agents, no copied diffs.
+  The state store warns on `\`\`\`` fences and over-long bodies — keep that
+  behavior; it's how the rule gets enforced softly.
+- Agents declare **file intent + reason** before edits via `aol_claim_file`.
+- Peers can wait via `aol_wait_for_release`, then re-read after release and
+  *drop* their edit if it's already covered.
+- A parent agent should be able to **DM-check-in** on a sub-agent that claimed
+  a file and went quiet.
 
-- `ROOM_SCRIPT` / `DM_SCRIPTS` in `aol-core.jsx` for canned text
-- the `transitions` array in `aol-app.jsx` (`React.useEffect` keyed on `signedOn`, ~line 222) for lifecycle changes
-- `INITIAL_STATES` in `aol-core.jsx` for the starting tableau
+The UI surfaces these via the File Targets table (holder + mode + reason +
+waiter count) and the Activity Log's `claim` / `release` / `online` / `msg` /
+`dm` event kinds. New tools/UI must use the same vocabulary.
 
-A generic IM reply ladder (`['ack 👍', 'noted, ty', ...]`) kicks in once a `DM_SCRIPTS[agentId]` script is exhausted — that's why typing into a DM always gets *something* back.
+## When extending
 
-## Inter-agent communication norms (from README)
-
-If/when you build the MCP layer, the README's coordination rules are load-bearing product requirements, not stylistic preferences:
-
-- **Short messages**, no fenced code blocks between agents, no copied diffs — describe intent in prose.
-- Agents declare **file intent + rationale** before edits; peers can wait, then re-read after a claim clears and *drop* their edit if it's already covered.
-- A parent agent should be able to **check in** on a sub-agent that claimed a file and went quiet.
-
-The UI surfaces these via the File Targets table (holder + status pill + reason + "waiting on…") and the Activity Log's `claim` / `release` / `online` / `msg` event kinds. Keep new tools/UI consistent with that vocabulary.
+- New MCP tool: add a route in `src/daemon/routes.ts`, a method on
+  `AolClient`, and a `registerTool` call in `src/mcp/index.ts`. Keep tool
+  descriptions reminding the model of the coordination rules.
+- New event: extend `BroadcastEvent` in `src/shared/types.ts`, publish it from
+  the relevant route, and wire it in `aol-app.jsx`'s SSE handler.
+- New UI window: append to `aol-windows.jsx`, register it in the App's
+  `windows` state in `aol-app.jsx`, hook up an icon in `Icon` (in
+  `aol-core.jsx`).

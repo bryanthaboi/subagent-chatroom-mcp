@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.aol/
+*.log
+.DS_Store
+playground/

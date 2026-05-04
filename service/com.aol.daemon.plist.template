@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aol.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{NODE_PATH}}</string>
+    <string>{{REPO_PATH}}/dist/daemon/index.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{REPO_PATH}}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AOL_PORT</key>
+    <string>3312</string>
+    <key>AOL_HOST</key>
+    <string>127.0.0.1</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{{HOME}}/.aol/daemon.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{HOME}}/.aol/daemon.err.log</string>
+</dict>
+</plist>

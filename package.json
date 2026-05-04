@@ -1,0 +1,37 @@
+{
+  "name": "agents-online",
+  "version": "0.1.0",
+  "description": "AOL — Agents On Line: MCP server + retro web UI for coordinating sub-agents",
+  "type": "module",
+  "bin": {
+    "aol": "dist/cli/aol.js",
+    "aol-mcp": "dist/mcp/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli/aol.js dist/mcp/index.js",
+    "dev": "tsx src/daemon/index.ts",
+    "start": "node dist/cli/aol.js start --detach",
+    "start:fg": "node dist/cli/aol.js start",
+    "stop": "node dist/cli/aol.js stop",
+    "restart": "node dist/cli/aol.js restart",
+    "status": "node dist/cli/aol.js status",
+    "kill": "node dist/cli/aol.js kill",
+    "service:install": "bash scripts/install-service.sh",
+    "service:uninstall": "bash scripts/uninstall-service.sh",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
