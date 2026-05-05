@@ -7,6 +7,10 @@ const { SignOn } = window.AOL_SIGNON;
 function App() {
   const [signedOn, setSignedOn] = React.useState(false);
   const [observer, setObserver] = React.useState({ name: 'observer', repoPath: null });
+  // Synchronous read of observer id — useState updates don't propagate before
+  // SSE events arrive after a fresh registerObserver call.
+  const observerIdRef = React.useRef(null);
+  React.useEffect(() => { observerIdRef.current = observer.id || null; }, [observer.id]);
 
   // server-sourced state
   const [repos, setRepos] = React.useState([]);
@@ -74,7 +78,8 @@ function App() {
   }, []);
 
   const handleMessage = React.useCallback((message) => {
-    const fromSelf = observer.id && message.from === observer.id;
+    const obsId = observerIdRef.current;
+    const fromSelf = obsId && message.from === obsId;
     if (message.to === null) {
       // room message — append to per-repo scrollback
       setMessagesByRepo(m => {
@@ -84,10 +89,10 @@ function App() {
       if (!fromSelf) AudioFx.imRecv();
     } else {
       // DM — file under the other party id
-      const peerId = message.from === observer.id ? message.to : message.from;
+      const peerId = fromSelf ? message.to : message.from;
       setDms(d => ({ ...d, [peerId]: [...(d[peerId] || []), message] }));
       // Auto-reopen DM if addressed to observer
-      if (message.to === observer.id) {
+      if (obsId && message.to === obsId) {
         setDmWindows(w => ({
           ...w,
           [peerId]: {
@@ -100,15 +105,18 @@ function App() {
           },
         }));
         setZCounter(z => z + 1);
-        if (!fromSelf) AudioFx.imRecv();
+        AudioFx.imRecv();
       } else if (!fromSelf) {
         AudioFx.imRecv();
       }
     }
-  }, [observer.id, zCounter]);
+  }, [zCounter]);
 
   const handleActivity = React.useCallback((event) => {
     setActivity((es) => [...es, event].slice(-300));
+    // Don't audibly chime when the event is about the observer themselves
+    // (e.g. lazy registration on first DM/room post).
+    if (event.agentId === observerIdRef.current) return;
     if (event.kind === 'online') AudioFx.signon();
     if (event.kind === 'offline') AudioFx.signoff();
     if (event.kind === 'claim') AudioFx.workStart();
@@ -249,8 +257,14 @@ function App() {
     setActiveWin('dm:' + agent.id);
     if (!dms[agent.id]) {
       try {
-        const r = await AolNet.getMessages({ repoPath: agent.repoPath, peer: agent.id, agentId: observer.id || 'observer' });
-        setDms(d => ({ ...d, [agent.id]: r.messages || [] }));
+        const obsId = observerIdRef.current;
+        if (obsId) {
+          const r = await AolNet.getMessages({ repoPath: agent.repoPath, peer: agent.id, agentId: obsId });
+          setDms(d => ({ ...d, [agent.id]: r.messages || [] }));
+        } else {
+          // No observer registered yet — nothing to load.
+          setDms(d => ({ ...d, [agent.id]: [] }));
+        }
       } catch (e) {}
     }
     AudioFx.knock();
@@ -266,6 +280,9 @@ function App() {
     try {
       const r = await AolNet.registerObserver({ name: observer.name, repoPath, role: 'observer' });
       const id = r.agent.id;
+      // Update ref synchronously so SSE events arriving in the next tick see
+      // the new id immediately, before React re-renders.
+      observerIdRef.current = id;
       setObserver(o => ({ ...o, id, repoPath }));
       return id;
     } catch (e) {
@@ -419,7 +436,7 @@ function App() {
                  x={windows.log.x} y={windows.log.y} w={windows.log.w} h={windows.log.h}
                  active={activeWin === 'log'} onActivate={activateWin} onClose={closeWin}
                  minSize={{ w: 360, h: 240 }}>
-              <ActivityLog events={activity} repos={repos} scope={logScope} onScopeChange={setLogScope} />
+              <ActivityLog events={activity} repos={repos} scope={logScope} onScopeChange={setLogScope} agents={agents} />
             </Win>
           </div>
         )}

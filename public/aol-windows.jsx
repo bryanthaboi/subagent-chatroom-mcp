@@ -218,7 +218,10 @@ function DMWindow({ agent, log, onSend, observerName }) {
   React.useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [log]);
+  const unreachable = agent.status === 'away' || agent.status === 'offline';
+  const tip = unreachable ? `${agent.name} is ${agent.status} — you can't send right now` : '';
   const send = () => {
+    if (unreachable) return;
     if (!text.trim()) return;
     onSend(agent.id, text.trim());
     setText('');
@@ -244,15 +247,29 @@ function DMWindow({ agent, log, onSend, observerName }) {
         ))}
         {log.length === 0 && <div style={{ color: '#888', fontStyle: 'italic' }}>no messages yet</div>}
       </div>
+      {unreachable && (
+        <div style={{ padding: '4px 8px', background: '#fff5d0', borderTop: '1px solid #d8c878', fontSize: 11, color: '#7a5a00' }}>
+          {agent.name} is {agent.status}. you can't send messages until they're back online.
+        </div>
+      )}
       <textarea
         className="dm-input"
         value={text}
         onChange={e => setText(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-        placeholder={`message ${agent.name}...`}
+        placeholder={unreachable ? tip : `message ${agent.name}...`}
+        disabled={unreachable}
+        title={tip}
+        style={unreachable ? { background: '#f0f0f0', color: '#888', cursor: 'not-allowed' } : undefined}
       />
       <div style={{ padding: '0 4px 4px', display: 'flex', gap: 4 }}>
-        <button className="btn" style={{ marginLeft: 'auto' }} onClick={send}>Send</button>
+        <button
+          className="btn"
+          style={{ marginLeft: 'auto' }}
+          onClick={send}
+          disabled={unreachable || !text.trim()}
+          title={tip}
+        >Send</button>
       </div>
     </>
   );
@@ -329,9 +346,14 @@ function FileTargets({ claims, repos, scope, onScopeChange, onMessage, onForceRe
 }
 
 // ===== Activity Log ======================================================
-function ActivityLog({ events, repos, scope, onScopeChange }) {
+function ActivityLog({ events, repos, scope, onScopeChange, agents }) {
   const ref = React.useRef(null);
   const filtered = scope === 'all' ? events : events.filter(e => e.repoPath === scope);
+  const nameById = React.useMemo(() => {
+    const m = {};
+    for (const a of agents || []) m[a.id] = a.name;
+    return m;
+  }, [agents]);
   React.useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [filtered]);
@@ -360,7 +382,7 @@ function ActivityLog({ events, repos, scope, onScopeChange }) {
             <span className={'ev-' + (e.kind === 'msg' || e.kind === 'dm' ? 'msg' : e.kind)}>[{e.kind.padEnd(8, ' ')}]</span>{' '}
             <span className="who">{e.agentName}</span>{' '}
             {e.target && <span style={{ color: '#fb0' }}>{e.target} </span>}
-            {e.peer && <span style={{ color: '#888' }}>→ {e.peer} </span>}
+            {e.peer && <span style={{ color: '#888' }}>→ {nameById[e.peer] || e.peer} </span>}
             {e.body && <span>· {e.body}</span>}
           </div>
         ))}
