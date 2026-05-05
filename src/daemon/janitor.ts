@@ -4,11 +4,13 @@ import { advanceQuestions } from './questions.js';
 
 const AWAY_AFTER_MS = 15 * 60 * 1000;
 const OFFLINE_AFTER_MS = 15 * 60 * 1000;
+const OBSERVER_STALE_AFTER_MS = 60 * 1000;
 
 export interface JanitorOptions {
   intervalMs?: number;
   awayAfterMs?: number;
   offlineAfterMs?: number;
+  observerStaleAfterMs?: number;
   now?: () => number;
 }
 
@@ -21,6 +23,7 @@ export function startJanitor(state: State, bus: Bus, opts: JanitorOptions = {}):
   const interval = opts.intervalMs ?? 30_000;
   const awayMs = opts.awayAfterMs ?? AWAY_AFTER_MS;
   const offlineMs = opts.offlineAfterMs ?? OFFLINE_AFTER_MS;
+  const observerStaleMs = opts.observerStaleAfterMs ?? OBSERVER_STALE_AFTER_MS;
   const now = opts.now ?? (() => Date.now());
 
   function tick(): void {
@@ -41,6 +44,21 @@ export function startJanitor(state: State, bus: Bus, opts: JanitorOptions = {}):
     }
 
     for (const a of state.agentsToOffline(t - offlineMs)) {
+      const updated = state.setOffline(a.id);
+      if (updated) {
+        bus.publish({ type: 'agent', repoPath: updated.repoPath, agent: updated });
+        const ev = state.addActivity({
+          repoPath: updated.repoPath,
+          kind: 'offline',
+          agentId: updated.id,
+        });
+        bus.publish({ type: 'activity', repoPath: updated.repoPath, event: ev });
+      }
+    }
+
+    // Observers: no away/idle aging. Just flip to offline when their UI
+    // heartbeat has stopped (browser closed / crashed / network dead).
+    for (const a of state.observersToOffline(t - observerStaleMs)) {
       const updated = state.setOffline(a.id);
       if (updated) {
         bus.publish({ type: 'agent', repoPath: updated.repoPath, agent: updated });

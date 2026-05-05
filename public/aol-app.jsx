@@ -10,6 +10,10 @@ function App() {
   // Synchronous read of observer id — useState updates don't propagate before
   // SSE events arrive after a fresh registerObserver call.
   const observerIdRef = React.useRef(null);
+  // Every observer record we've registered this session (one per repo we've
+  // touched). All of them get heartbeated, and all of them get beaconed offline
+  // when the browser closes — the observer is "online" only while the UI is open.
+  const observerIdsRef = React.useRef(new Set());
   React.useEffect(() => { observerIdRef.current = observer.id || null; }, [observer.id]);
 
   // server-sourced state
@@ -283,6 +287,7 @@ function App() {
       // Update ref synchronously so SSE events arriving in the next tick see
       // the new id immediately, before React re-renders.
       observerIdRef.current = id;
+      observerIdsRef.current.add(id);
       setObserver(o => ({ ...o, id, repoPath }));
       return id;
     } catch (e) {
@@ -290,6 +295,36 @@ function App() {
       throw e;
     }
   };
+
+  // Heartbeat every observer record we've registered, so the daemon doesn't
+  // flip them to offline as long as this UI tab is open.
+  React.useEffect(() => {
+    if (!signedOn) return;
+    const t = setInterval(() => {
+      for (const id of observerIdsRef.current) {
+        AolNet.heartbeat(id).catch(() => {});
+      }
+    }, 20_000);
+    return () => clearInterval(t);
+  }, [signedOn]);
+
+  // When the tab is closing, best-effort flip every observer record to away
+  // (the daemon's observer-staleness check will then move them to offline
+  // within ~60s if the heartbeat doesn't resume).
+  React.useEffect(() => {
+    if (!signedOn) return;
+    const onUnload = () => {
+      for (const id of observerIdsRef.current) {
+        AolNet.beaconOffline(id);
+      }
+    };
+    window.addEventListener('beforeunload', onUnload);
+    window.addEventListener('pagehide', onUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onUnload);
+      window.removeEventListener('pagehide', onUnload);
+    };
+  }, [signedOn]);
 
   const sendRoom = async (repoPath, body) => {
     try {

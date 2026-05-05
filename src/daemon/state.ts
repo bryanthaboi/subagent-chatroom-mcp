@@ -466,11 +466,14 @@ export class State {
   }
 
   // ---------- janitor helpers ----------
+  // Observers (the human user) never auto-age to away/offline by idleness;
+  // they have their own staleness check driven by browser heartbeats.
   agentsToAway(idleCutoff: number): Agent[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM agents
-         WHERE status IN ('online','idle','editing','reviewing','waiting','complete','abandoned')
+         WHERE role != 'observer'
+           AND status IN ('online','idle','editing','reviewing','waiting','complete','abandoned')
            AND last_seen < ?`
       )
       .all(idleCutoff) as AgentRow[];
@@ -479,8 +482,25 @@ export class State {
 
   agentsToOffline(awayCutoff: number): Agent[] {
     const rows = this.db
-      .prepare(`SELECT * FROM agents WHERE status = 'away' AND away_since IS NOT NULL AND away_since < ?`)
+      .prepare(
+        `SELECT * FROM agents
+         WHERE role != 'observer'
+           AND status = 'away' AND away_since IS NOT NULL AND away_since < ?`
+      )
       .all(awayCutoff) as AgentRow[];
+    return rows.map(rowToAgent);
+  }
+
+  /** Observers whose UI heartbeat has gone stale; should be flipped to offline. */
+  observersToOffline(staleCutoff: number): Agent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agents
+         WHERE role = 'observer'
+           AND status != 'offline'
+           AND last_seen < ?`
+      )
+      .all(staleCutoff) as AgentRow[];
     return rows.map(rowToAgent);
   }
 

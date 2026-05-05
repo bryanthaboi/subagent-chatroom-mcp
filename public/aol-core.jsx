@@ -120,6 +120,14 @@ const AolNet = (() => {
       return j('POST', '/api/agents', { name, repoPath, role, color: '#000080' });
     },
     deleteAgent(id) { return j('DELETE', '/api/agents/' + encodeURIComponent(id)); },
+    heartbeat(id) { return j('POST', '/api/agents/' + encodeURIComponent(id) + '/heartbeat'); },
+    beaconOffline(id) {
+      try {
+        const url = '/api/agents/' + encodeURIComponent(id) + '/offline';
+        const blob = new Blob(['{}'], { type: 'application/json' });
+        return navigator.sendBeacon ? navigator.sendBeacon(url, blob) : false;
+      } catch (e) { return false; }
+    },
     subscribe(repoPath, onEvent) {
       const qs = repoPath ? '?repoPath=' + encodeURIComponent(repoPath) : '';
       const es = new EventSource('/api/events' + qs);

@@ -88,14 +88,22 @@ export async function handleApi(
       const m = p.match(/^\/api\/agents\/([^/]+)\/offline$/);
       if (m && method === 'POST') {
         const body = await readJson(req).catch(() => ({}));
-        const agent = state.setAway(m[1], body.awayMessage);
+        const existing = state.getAgent(m[1]);
+        if (!existing) return send(res, 404, { error: 'agent not found' });
+        // Observers go straight to offline (no away state — they're the user).
+        // Sub-agents go to "away" first, then the janitor flips them to offline
+        // after 15 min idle.
+        const isObserver = existing.role === 'observer';
+        const agent = isObserver
+          ? state.setOffline(m[1])
+          : state.setAway(m[1], body.awayMessage);
         if (!agent) return send(res, 404, { error: 'agent not found' });
         bus.publish({ type: 'agent', repoPath: agent.repoPath, agent });
         const ev = state.addActivity({
           repoPath: agent.repoPath,
-          kind: 'away',
+          kind: isObserver ? 'offline' : 'away',
           agentId: agent.id,
-          body: agent.awayMessage,
+          body: isObserver ? undefined : agent.awayMessage,
         });
         bus.publish({ type: 'activity', repoPath: agent.repoPath, event: ev });
         return send(res, 200, { agent });
