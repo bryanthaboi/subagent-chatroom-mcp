@@ -113,8 +113,13 @@ const AolNet = (() => {
     },
     sendMessage(input) { return j('POST', '/api/messages', input); },
     releaseClaim(claimId, summary) { return j('POST', '/api/claims/' + encodeURIComponent(claimId) + '/release', { summary }); },
-    setOffline(agentId) { return j('POST', '/api/agents/' + encodeURIComponent(agentId) + '/offline'); },
-    registerObserver({ name, repoPath }) { return j('POST', '/api/agents', { name, repoPath, color: '#000080' }); },
+    setOffline(agentId, awayMessage) {
+      return j('POST', '/api/agents/' + encodeURIComponent(agentId) + '/offline', awayMessage ? { awayMessage } : {});
+    },
+    registerObserver({ name, repoPath, role = 'observer' }) {
+      return j('POST', '/api/agents', { name, repoPath, role, color: '#000080' });
+    },
+    deleteAgent(id) { return j('DELETE', '/api/agents/' + encodeURIComponent(id)); },
     subscribe(repoPath, onEvent) {
       const qs = repoPath ? '?repoPath=' + encodeURIComponent(repoPath) : '';
       const es = new EventSource('/api/events' + qs);
@@ -130,6 +135,7 @@ const AolNet = (() => {
 const STATUS_COLORS = {
   online: '#00aa00', idle: '#999900', editing: '#cc4400', reviewing: '#0088cc',
   waiting: '#7700aa', complete: '#006622', abandoned: '#666666', offline: '#aa0000',
+  away: '#cc8800',
 };
 
 const PALETTE = ['#ff4444', '#aa44dd', '#0088cc', '#cc6600', '#226622',
@@ -163,6 +169,14 @@ function tsHMS(ms) {
   return String(d.getHours()).padStart(2, '0') + ':' +
          String(d.getMinutes()).padStart(2, '0') + ':' +
          String(d.getSeconds()).padStart(2, '0');
+}
+function relTime(ts) {
+  if (!ts) return '';
+  const delta = Math.max(0, Date.now() - ts);
+  if (delta < 60_000) return 'just now';
+  if (delta < 3_600_000) return Math.floor(delta / 60_000) + 'm ago';
+  if (delta < 86_400_000) return Math.floor(delta / 3_600_000) + 'h ago';
+  return Math.floor(delta / 86_400_000) + 'd ago';
 }
 
 // ===== Window Manager ====================================================
@@ -297,5 +311,5 @@ const Icon = {
 
 window.AOL_DATA = {
   AudioFx, Win, Icon, AolNet,
-  STATUS_COLORS, colorForName, avatarLetter, basename, tsHM, tsHMS,
+  STATUS_COLORS, colorForName, avatarLetter, basename, tsHM, tsHMS, relTime,
 };

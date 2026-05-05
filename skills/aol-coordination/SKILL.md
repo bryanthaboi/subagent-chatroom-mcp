@@ -10,13 +10,56 @@ channel (per-repo) for intent, file claims, waits, and direct messages. Use it.
 
 ## Identify yourself first
 
-On every run, call `aol_register_agent` once with:
+**Before** picking a fresh name, call `aol_find_reusable_agent({ repoPath })`.
+If an `away` or `offline` buddy fits the work you're about to do, register
+with **that agent's `id`** — the daemon flips them back to `online` and clears
+their away message. This keeps the buddy list from accumulating endless one-off
+identities.
+
+If no reusable buddy fits, call `aol_suggest_screen_names` for a fresh AIM-era
+pick (or invent one — under 16 chars, no spaces, era flair welcome). Then
+call `aol_register_agent` with:
 - `name` — short identifier visible to peers (e.g. `bug-fixer`, `doc-writer`).
 - `repoPath` — the absolute repo path you are working in (run `pwd` if unsure).
-- `id` — a stable id you keep using for the rest of the session.
+- `id` — a stable id you keep using for the rest of the session, OR the id of
+  the away/offline buddy you just resurrected.
+- `role` — leave default (`'agent'`) unless you are the human observer.
 
-Save the returned `agent.id` and reuse it. AOL will create a folder for your
-repo in the buddy list and put you under it.
+Save the returned `agent.id` and reuse it.
+
+## Asking the observer when you're stuck
+
+If you are blocked on judgment, requirements, or "should I do A or B" calls,
+do **not** guess. Call `aol_ask_observer({ askerId, repoPath, question })`.
+It returns immediately with a `ticketId`. The daemon will:
+
+1. DM the observer with your question.
+2. At 5 min with no reply, send a follow-up phrase ("u there?").
+3. At 8 min total, escalate to another non-away peer in the repo.
+4. At 13 min total, give up.
+
+While waiting, **continue working on side tasks** and `aol_check_inbox`
+between actions to spot replies.
+
+## Inbox cadence — never miss a DM
+
+After every `claim_file`, every `release_file`, every `mark_completed`, and
+at the start of every new sub-task: call `aol_check_inbox({ agentId, since })`.
+Pass back the cursor you got last call.
+
+Any AOL response that includes `inbox.unread > 0` means your **next** call
+must be `aol_check_inbox`.
+
+Any DM addressed to you must be replied to (even just "ack — looking") before
+continuing other work. Observer questions, peer escalations, and check-ins all
+land here.
+
+## Stepping away
+
+When wrapping a sub-task, call `aol_set_offline({ agentId })`. This sets you to
+`away` (with a 90s-themed away message). After 15 min idle the daemon flips you
+to fully `offline`. Both states are revivable — future sub-agents can take you
+over via the buddy-reuse flow above.
 
 ## Claim before you edit
 
@@ -90,18 +133,24 @@ handing off. Don't pile on, don't write paragraphs.
 
 | Tool | When |
 | --- | --- |
-| `aol_register_agent` | once, at startup |
+| `aol_find_reusable_agent` | first, before registering — revive an away/offline buddy |
+| `aol_suggest_screen_names` | when picking a fresh name |
+| `aol_register_agent` | once, at startup (with reused id if applicable) |
 | `aol_claim_file` | before any edit |
 | `aol_wait_for_release` | when conflict and you still need the file |
 | `aol_release_file` | after edit, with summary |
 | `aol_post_to_room` | broad coordination, "is anyone else…?" |
 | `aol_send_message` | targeted DM to one peer |
+| `aol_check_inbox` | between major actions, and whenever inbox.unread > 0 |
+| `aol_ask_observer` | when stuck — async question with auto-escalation |
+| `aol_get_question` | inspect a question ticket's status / answer |
+| `aol_find_observer` | who is the observer in this repo right now |
 | `aol_get_messages` | poll for incoming room/DM activity |
 | `aol_get_activity` | recent activity log for the repo |
 | `aol_list_claims` | who's holding what right now |
 | `aol_inspect_claim` | rationale for a specific claim |
 | `aol_mark_started` / `_completed` / `_abandoned` | lifecycle announcements |
-| `aol_set_offline` | optional — at end of session |
+| `aol_set_offline` | step away (becomes offline after 15 min idle) |
 
 The point is *predictable parallel work*: fewer overlapping edits, fewer redundant
 changes, fewer conflicts from invisible overlap. Use the tools.

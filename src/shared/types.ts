@@ -6,7 +6,10 @@ export type AgentStatus =
   | 'reviewing'
   | 'waiting'
   | 'complete'
-  | 'abandoned';
+  | 'abandoned'
+  | 'away';
+
+export type AgentRole = 'agent' | 'observer';
 
 export type ClaimMode = 'edit' | 'review';
 
@@ -15,10 +18,14 @@ export interface Agent {
   name: string;
   repoPath: string;
   status: AgentStatus;
+  role: AgentRole;
   currentFile?: string;
   reason?: string;
   waitingOn?: string;
   color: string;
+  awayMessage?: string;
+  awaySince?: number;
+  signedOffAt?: number;
   createdAt: number;
   lastSeen: number;
 }
@@ -52,6 +59,7 @@ export interface Message {
 export type ActivityKind =
   | 'online'
   | 'offline'
+  | 'away'
   | 'claim'
   | 'release'
   | 'msg'
@@ -60,7 +68,10 @@ export type ActivityKind =
   | 'wait'
   | 'started'
   | 'complete'
-  | 'abandon';
+  | 'abandon'
+  | 'resurrect'
+  | 'delete'
+  | 'question';
 
 export interface ActivityEvent {
   id: string;
@@ -74,8 +85,32 @@ export interface ActivityEvent {
   ts: number;
 }
 
+export type QuestionStatus = 'pending' | 'following_up' | 'escalated' | 'answered' | 'expired';
+
+export interface Question {
+  id: string;
+  askerId: string;
+  repoPath: string;
+  question: string;
+  observerId: string | null;
+  status: QuestionStatus;
+  sentAt: number;
+  followUpAt?: number;
+  escalatedAt?: number;
+  escalatedTo?: string;
+  answeredAt?: number;
+  answerMessageId?: string;
+}
+
+export interface InboxSummary {
+  unread: number;
+  latestFrom?: string;
+  latestTs?: number;
+}
+
 export type BroadcastEvent =
   | { type: 'agent'; repoPath: string; agent: Agent }
+  | { type: 'agent-deleted'; repoPath: string; agentId: string }
   | { type: 'claim'; repoPath: string; claim: Claim }
   | { type: 'release'; repoPath: string; claim: Claim }
   | { type: 'message'; repoPath: string; message: Message }

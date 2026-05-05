@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { handleApi, handleSse } from './routes.js';
 import { State } from './state.js';
 import { Bus } from './events.js';
+import { startJanitor, type JanitorHandle } from './janitor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -54,25 +55,29 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, url: U
 export interface ServerOptions {
   port: number;
   host?: string;
+  dbFilename?: string;
 }
 
-export function createServer(opts: ServerOptions): {
+export interface CreatedServer {
   server: http.Server;
   state: State;
   bus: Bus;
+  janitor: JanitorHandle;
   start: () => Promise<void>;
   stop: () => Promise<void>;
-} {
-  const state = new State();
+}
+
+export function createServer(opts: ServerOptions): CreatedServer {
+  const state = new State(opts.dbFilename);
   const bus = new Bus();
   bus.setMaxListeners(100);
+  const janitor = startJanitor(state, bus);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-    // CORS for API/SSE
     if (url.pathname.startsWith('/api/')) {
       res.setHeader('access-control-allow-origin', '*');
-      res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+      res.setHeader('access-control-allow-methods', 'GET,POST,DELETE,OPTIONS');
       res.setHeader('access-control-allow-headers', 'content-type');
       if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -89,6 +94,7 @@ export function createServer(opts: ServerOptions): {
     server,
     state,
     bus,
+    janitor,
     start: () =>
       new Promise<void>((resolve, reject) => {
         server.once('error', reject);
@@ -99,6 +105,8 @@ export function createServer(opts: ServerOptions): {
       }),
     stop: () =>
       new Promise<void>((resolve) => {
+        janitor.stop();
+        state.close();
         server.close(() => resolve());
       }),
   };

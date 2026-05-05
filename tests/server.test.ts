@@ -6,7 +6,7 @@ let baseUrl: string;
 let stop: () => Promise<void>;
 
 beforeAll(async () => {
-  const inst = createServer({ port: 0 });
+  const inst = createServer({ port: 0, dbFilename: ':memory:' });
   await inst.start();
   const port = (inst.server.address() as AddressInfo).port;
   baseUrl = `http://127.0.0.1:${port}`;
@@ -126,5 +126,82 @@ describe('HTTP API', () => {
     const repos = await api('GET', '/api/repos');
     expect(repos.status).toBe(200);
     expect(Array.isArray(repos.body.repos)).toBe(true);
+  });
+});
+
+describe('iteration 2 endpoints', () => {
+  it('reusable agents include away and offline; re-register flips back online', async () => {
+    const repoPath = '/tmp/reuse-' + Date.now();
+    const id = 'reuse-a-' + Date.now();
+    await api('POST', '/api/agents', { id, name: 'reusey', repoPath });
+    await api('POST', `/api/agents/${id}/offline`, {});
+    const reusable = await api('GET', `/api/agents/reusable?repoPath=${encodeURIComponent(repoPath)}`);
+    expect(reusable.status).toBe(200);
+    expect(reusable.body.agents.find((a: any) => a.id === id)).toBeTruthy();
+    const r = await api('POST', '/api/agents', { id, name: 'reusey-v2', repoPath });
+    expect(r.status).toBe(201);
+    expect(r.body.agent.status).toBe('online');
+    expect(r.body.agent.awayMessage).toBeFalsy();
+    expect(r.body.agent.name).toBe('reusey-v2');
+  });
+
+  it('observer endpoint and ask question flow', async () => {
+    const repoPath = '/tmp/q-' + Date.now();
+    const obs = 'obs-' + Date.now();
+    const asker = 'asker-' + Date.now();
+    await api('POST', '/api/agents', { id: obs, name: 'obs', repoPath, role: 'observer' });
+    await api('POST', '/api/agents', { id: asker, name: 'alice', repoPath });
+    const o = await api('GET', `/api/observer?repoPath=${encodeURIComponent(repoPath)}`);
+    expect(o.body.found).toBe(true);
+    expect(o.body.observer.id).toBe(obs);
+
+    const ticket = await api('POST', '/api/questions', {
+      askerId: asker,
+      repoPath,
+      question: 'what next',
+    });
+    expect(ticket.status).toBe(201);
+    expect(ticket.body.observerId).toBe(obs);
+
+    await api('POST', '/api/messages', {
+      from: obs,
+      to: asker,
+      repoPath,
+      body: 'try X',
+    });
+
+    const q = await api('GET', `/api/questions/${ticket.body.ticketId}`);
+    expect(q.body.question.status).toBe('answered');
+    expect(q.body.answer?.body).toBe('try X');
+  });
+
+  it('inbox endpoints return DMs and a summary', async () => {
+    const repoPath = '/tmp/inbox-' + Date.now();
+    await api('POST', '/api/agents', { id: 'ib1', name: 'ib1', repoPath });
+    await api('POST', '/api/agents', { id: 'ib2', name: 'ib2', repoPath });
+    await api('POST', '/api/messages', { from: 'ib2', to: 'ib1', repoPath, body: 'yo' });
+    const summ = await api('GET', '/api/inbox-summary?agentId=ib1');
+    expect(summ.body.unread).toBeGreaterThanOrEqual(1);
+    const inbox = await api('GET', '/api/inbox?agentId=ib1&since=0');
+    expect(inbox.body.messages.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('screen-names endpoint returns N distinct names', async () => {
+    const r = await api('GET', '/api/screen-names?count=4');
+    expect(r.status).toBe(200);
+    expect(r.body.names.length).toBe(4);
+    expect(new Set(r.body.names).size).toBe(4);
+  });
+
+  it('delete only allowed when offline', async () => {
+    const repoPath = '/tmp/del-' + Date.now();
+    const id = 'del-' + Date.now();
+    await api('POST', '/api/agents', { id, name: 'd', repoPath });
+    const bad = await api('DELETE', `/api/agents/${id}`);
+    expect(bad.status).toBe(400);
+    // step away then to offline manually via setStatus
+    await api('POST', `/api/agents/${id}/status`, { status: 'offline' });
+    const ok = await api('DELETE', `/api/agents/${id}`);
+    expect(ok.status).toBe(200);
   });
 });

@@ -3,6 +3,8 @@ import type { State } from './state.js';
 import type { Bus } from './events.js';
 import { normalizeRepoPath, repoBasename, validateAgentMessage } from './state.js';
 import type { ClaimMode, BroadcastEvent } from '../shared/types.js';
+import { startQuestion, onMessageMaybeAnswer } from './questions.js';
+import { suggestScreenNames } from './lexicon.js';
 
 type Json = unknown;
 
@@ -33,7 +35,7 @@ async function readJson(req: IncomingMessage): Promise<any> {
   });
 }
 
-function publishAgent(bus: Bus, state: State, repoPath: string): void {
+function publishRepo(bus: Bus, repoPath: string): void {
   bus.publish({
     type: 'repo',
     repoPath,
@@ -59,7 +61,7 @@ export async function handleApi(
         return send(res, 400, { error: 'name and repoPath required' });
       }
       const agent = state.registerAgent(body);
-      publishAgent(bus, state, agent.repoPath);
+      publishRepo(bus, agent.repoPath);
       bus.publish({ type: 'agent', repoPath: agent.repoPath, agent });
       const ev = state.addActivity({
         repoPath: agent.repoPath,
@@ -76,16 +78,24 @@ export async function handleApi(
       return send(res, 200, { agents: state.listAgents(repoPath) });
     }
 
+    if (p === '/api/agents/reusable' && method === 'GET') {
+      const repoPath = url.searchParams.get('repoPath');
+      if (!repoPath) return send(res, 400, { error: 'repoPath required' });
+      return send(res, 200, { agents: state.listReusableAgents(repoPath) });
+    }
+
     {
       const m = p.match(/^\/api\/agents\/([^/]+)\/offline$/);
       if (m && method === 'POST') {
-        const agent = state.setOffline(m[1]);
+        const body = await readJson(req).catch(() => ({}));
+        const agent = state.setAway(m[1], body.awayMessage);
         if (!agent) return send(res, 404, { error: 'agent not found' });
         bus.publish({ type: 'agent', repoPath: agent.repoPath, agent });
         const ev = state.addActivity({
           repoPath: agent.repoPath,
-          kind: 'offline',
+          kind: 'away',
           agentId: agent.id,
+          body: agent.awayMessage,
         });
         bus.publish({ type: 'activity', repoPath: agent.repoPath, event: ev });
         return send(res, 200, { agent });
@@ -115,6 +125,48 @@ export async function handleApi(
         });
         bus.publish({ type: 'activity', repoPath: agent.repoPath, event: ev });
         return send(res, 200, { agent });
+      }
+    }
+    // ---------- LIFECYCLE EVENTS ----------
+    {
+      const m = p.match(/^\/api\/agents\/([^/]+)\/(started|completed|abandoned)$/);
+      if (m && method === 'POST') {
+        const body = await readJson(req).catch(() => ({}));
+        const kind = m[2] as 'started' | 'completed' | 'abandoned';
+        const newStatus = kind === 'started' ? 'editing' : kind === 'completed' ? 'complete' : 'abandoned';
+        const agent = state.setStatus(m[1], {
+          status: newStatus,
+          currentFile: body.file,
+          reason: body.summary,
+        });
+        if (!agent) return send(res, 404, { error: 'agent not found' });
+        bus.publish({ type: 'agent', repoPath: agent.repoPath, agent });
+        const ev = state.addActivity({
+          repoPath: agent.repoPath,
+          kind: kind === 'started' ? 'started' : kind === 'completed' ? 'complete' : 'abandon',
+          agentId: agent.id,
+          target: body.file,
+          body: body.summary,
+        });
+        bus.publish({ type: 'activity', repoPath: agent.repoPath, event: ev });
+        return send(res, 200, { agent });
+      }
+    }
+
+    {
+      const m = p.match(/^\/api\/agents\/([^/]+)$/);
+      if (m && method === 'DELETE') {
+        const result = state.deleteAgent(m[1]);
+        if (!result.ok) return send(res, 400, { error: result.reason });
+        bus.publish({ type: 'agent-deleted', repoPath: result.agent.repoPath, agentId: result.agent.id });
+        const ev = state.addActivity({
+          repoPath: result.agent.repoPath,
+          kind: 'delete',
+          agentId: result.agent.id,
+          body: result.agent.name,
+        });
+        bus.publish({ type: 'activity', repoPath: result.agent.repoPath, event: ev });
+        return send(res, 200, { ok: true });
       }
     }
 
@@ -229,6 +281,7 @@ export async function handleApi(
         repoPath: body.repoPath,
       });
       bus.publish({ type: 'message', repoPath: msg.repoPath, message: msg });
+      onMessageMaybeAnswer(state, bus, msg);
       const ev = state.addActivity({
         repoPath: msg.repoPath,
         kind: msg.to ? 'dm' : 'msg',
@@ -251,6 +304,23 @@ export async function handleApi(
         agentId,
       });
       return send(res, 200, { messages });
+    }
+
+    // ---------- INBOX ----------
+    if (p === '/api/inbox' && method === 'GET') {
+      const agentId = url.searchParams.get('agentId');
+      if (!agentId) return send(res, 400, { error: 'agentId required' });
+      const since = Number(url.searchParams.get('since') ?? '0') || 0;
+      const messages = state.getInbox(agentId, since);
+      const cursor = messages.length ? messages[messages.length - 1].ts : since;
+      return send(res, 200, { messages, cursor });
+    }
+
+    if (p === '/api/inbox-summary' && method === 'GET') {
+      const agentId = url.searchParams.get('agentId');
+      if (!agentId) return send(res, 400, { error: 'agentId required' });
+      const since = Number(url.searchParams.get('since') ?? '0') || 0;
+      return send(res, 200, state.inboxSummary(agentId, since));
     }
 
     // ---------- ACTIVITY ----------
@@ -277,30 +347,54 @@ export async function handleApi(
       return send(res, 200, { ok: true, ts: Date.now() });
     }
 
-    // ---------- LIFECYCLE EVENTS (started/completed/abandoned) ----------
-    {
-      const m = p.match(/^\/api\/agents\/([^/]+)\/(started|completed|abandoned)$/);
-      if (m && method === 'POST') {
-        const body = await readJson(req).catch(() => ({}));
-        const kind = m[2] as 'started' | 'completed' | 'abandoned';
-        const newStatus = kind === 'started' ? 'editing' : kind === 'completed' ? 'complete' : 'abandoned';
-        const agent = state.setStatus(m[1], {
-          status: newStatus,
-          currentFile: body.file,
-          reason: body.summary,
-        });
-        if (!agent) return send(res, 404, { error: 'agent not found' });
-        bus.publish({ type: 'agent', repoPath: agent.repoPath, agent });
-        const ev = state.addActivity({
-          repoPath: agent.repoPath,
-          kind: kind === 'started' ? 'started' : kind === 'completed' ? 'complete' : 'abandon',
-          agentId: agent.id,
-          target: body.file,
-          body: body.summary,
-        });
-        bus.publish({ type: 'activity', repoPath: agent.repoPath, event: ev });
-        return send(res, 200, { agent });
+    // ---------- OBSERVER ----------
+    if (p === '/api/observer' && method === 'GET') {
+      const repoPath = url.searchParams.get('repoPath');
+      if (!repoPath) return send(res, 400, { error: 'repoPath required' });
+      const obs = state.findObserver(repoPath);
+      return send(res, 200, obs ? { found: true, observer: obs } : { found: false });
+    }
+
+    // ---------- QUESTIONS ----------
+    if (p === '/api/questions' && method === 'POST') {
+      const body = await readJson(req);
+      if (!body.askerId || !body.repoPath || !body.question) {
+        return send(res, 400, { error: 'askerId, repoPath, question required' });
       }
+      const ticket = startQuestion(state, bus, body);
+      return send(res, 201, {
+        ticketId: ticket.id,
+        observerId: ticket.observerId,
+        escalatedImmediately: ticket.status === 'escalated' || ticket.status === 'expired',
+        ticket,
+      });
+    }
+
+    {
+      const m = p.match(/^\/api\/questions\/([^/]+)$/);
+      if (m && method === 'GET') {
+        const q = state.getQuestion(m[1]);
+        if (!q) return send(res, 404, { error: 'question not found' });
+        let answer = null;
+        if (q.answerMessageId) {
+          answer = state
+            .getMessages({
+              repoPath: q.repoPath,
+              agentId: q.askerId,
+              peer: q.observerId ?? q.escalatedTo ?? undefined,
+            })
+            .find((mm) => mm.id === q.answerMessageId) ?? null;
+        }
+        return send(res, 200, { question: q, answer });
+      }
+    }
+
+    // ---------- SCREEN NAMES ----------
+    if (p === '/api/screen-names' && method === 'GET') {
+      const count = Math.max(1, Math.min(20, Number(url.searchParams.get('count') ?? '5')));
+      const repoPath = url.searchParams.get('repoPath') || undefined;
+      const taken = new Set(state.listAgents(repoPath).map((a) => a.name));
+      return send(res, 200, { names: suggestScreenNames(count, taken) });
     }
 
     return send(res, 404, { error: 'not found', path: p });

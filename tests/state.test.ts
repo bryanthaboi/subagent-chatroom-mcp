@@ -3,9 +3,9 @@ import { State, validateAgentMessage } from '../src/daemon/state.js';
 
 describe('State', () => {
   it('registers an agent and lists by repo', () => {
-    const s = new State();
+    const s = new State(':memory:');
     const a = s.registerAgent({ name: 'alice', repoPath: '/tmp/repo-a', id: 'alice' });
-    const b = s.registerAgent({ name: 'bob', repoPath: '/tmp/repo-b', id: 'bob' });
+    s.registerAgent({ name: 'bob', repoPath: '/tmp/repo-b', id: 'bob' });
     expect(a.name).toBe('alice');
     expect(s.listAgents('/tmp/repo-a').map((x) => x.id)).toEqual(['alice']);
     expect(s.listAgents('/tmp/repo-b').map((x) => x.id)).toEqual(['bob']);
@@ -15,7 +15,7 @@ describe('State', () => {
   });
 
   it('claims, conflicts, queues waiters, releases', () => {
-    const s = new State();
+    const s = new State(':memory:');
     s.registerAgent({ name: 'a', repoPath: '/tmp/r', id: 'a' });
     s.registerAgent({ name: 'b', repoPath: '/tmp/r', id: 'b' });
     s.registerAgent({ name: 'c', repoPath: '/tmp/r', id: 'c' });
@@ -40,7 +40,7 @@ describe('State', () => {
   });
 
   it('rejects same-file double-claim from same agent as idempotent', () => {
-    const s = new State();
+    const s = new State(':memory:');
     s.registerAgent({ name: 'a', repoPath: '/tmp/r', id: 'a' });
     const r1 = s.claimFile({ agentId: 'a', file: 'x.ts', mode: 'edit', reason: 'first' });
     const r2 = s.claimFile({ agentId: 'a', file: 'x.ts', mode: 'edit', reason: 'first' });
@@ -49,7 +49,7 @@ describe('State', () => {
   });
 
   it('messages: room + DM filtering', () => {
-    const s = new State();
+    const s = new State(':memory:');
     s.registerAgent({ name: 'a', repoPath: '/tmp/r', id: 'a' });
     s.registerAgent({ name: 'b', repoPath: '/tmp/r', id: 'b' });
     s.registerAgent({ name: 'c', repoPath: '/tmp/x', id: 'c' });
@@ -76,7 +76,7 @@ describe('State', () => {
   });
 
   it('activity log per repo with limits', () => {
-    const s = new State();
+    const s = new State(':memory:');
     s.registerAgent({ name: 'a', repoPath: '/tmp/r', id: 'a' });
     for (let i = 0; i < 10; i++) {
       s.addActivity({ repoPath: '/tmp/r', kind: 'msg', agentId: 'a', body: `m${i}` });
@@ -84,5 +84,84 @@ describe('State', () => {
     const got = s.getActivity({ repoPath: '/tmp/r', limit: 5 });
     expect(got.length).toBe(5);
     expect(got[got.length - 1].body).toBe('m9');
+  });
+});
+
+describe('State (iteration 2)', () => {
+  it('setAway sets status with message; janitor cutoff finds idle agents', () => {
+    const s = new State(':memory:');
+    s.registerAgent({ name: 'alice', repoPath: '/tmp/r', id: 'a' });
+    const away = s.setAway('a', 'brb pog hunting');
+    expect(away?.status).toBe('away');
+    expect(away?.awayMessage).toBe('brb pog hunting');
+    expect(typeof away?.awaySince).toBe('number');
+
+    s.registerAgent({ name: 'bob', repoPath: '/tmp/r', id: 'b' });
+    s.db.prepare(`UPDATE agents SET last_seen = 1 WHERE id = ?`).run('b');
+    const eligible = s.agentsToAway(2);
+    expect(eligible.map((x) => x.id)).toContain('b');
+  });
+
+  it('setOffline persists signedOffAt and listReusableAgents includes both away and offline', () => {
+    const s = new State(':memory:');
+    s.registerAgent({ name: 'a', repoPath: '/tmp/r', id: 'a' });
+    s.registerAgent({ name: 'b', repoPath: '/tmp/r', id: 'b' });
+    s.setAway('a');
+    s.setOffline('b');
+    const reusable = s.listReusableAgents('/tmp/r');
+    expect(reusable.map((x) => x.id).sort()).toEqual(['a', 'b']);
+    const offlineAgent = s.getAgent('b');
+    expect(typeof offlineAgent?.signedOffAt).toBe('number');
+  });
+
+  it('resurrect via registerAgent clears away fields', () => {
+    const s = new State(':memory:');
+    s.registerAgent({ name: 'alice', repoPath: '/tmp/r', id: 'alice' });
+    s.setAway('alice', 'brb');
+    const reborn = s.registerAgent({ name: 'alice', repoPath: '/tmp/r', id: 'alice' });
+    expect(reborn.status).toBe('online');
+    expect(reborn.awayMessage).toBeUndefined();
+    expect(reborn.awaySince).toBeUndefined();
+  });
+
+  it('deleteAgent only succeeds for offline agents', () => {
+    const s = new State(':memory:');
+    s.registerAgent({ name: 'a', repoPath: '/tmp/r', id: 'a' });
+    const r1 = s.deleteAgent('a');
+    expect(r1.ok).toBe(false);
+    s.setOffline('a');
+    const r2 = s.deleteAgent('a');
+    expect(r2.ok).toBe(true);
+    expect(s.getAgent('a')).toBeUndefined();
+  });
+
+  it('findObserver returns most recently active observer in repo', () => {
+    const s = new State(':memory:');
+    s.registerAgent({ name: 'human', repoPath: '/tmp/r', id: 'h1', role: 'observer' });
+    s.registerAgent({ name: 'agent', repoPath: '/tmp/r', id: 'a1' });
+    const obs = s.findObserver('/tmp/r');
+    expect(obs?.id).toBe('h1');
+    s.setOffline('h1');
+    expect(s.findObserver('/tmp/r')).toBeNull();
+  });
+
+  it('inboxSummary counts unread DMs since cursor', () => {
+    const s = new State(':memory:');
+    s.registerAgent({ name: 'a', repoPath: '/tmp/r', id: 'a' });
+    s.registerAgent({ name: 'b', repoPath: '/tmp/r', id: 'b' });
+    s.addMessage({ repoPath: '/tmp/r', from: 'b', to: 'a', body: 'hey' });
+    s.addMessage({ repoPath: '/tmp/r', from: 'b', to: 'a', body: 'hi' });
+    const summ = s.inboxSummary('a', 0);
+    expect(summ.unread).toBe(2);
+    expect(summ.latestFrom).toBe('b');
+  });
+
+  it('pickEscalationPeer picks online non-observer peer in same repo', () => {
+    const s = new State(':memory:');
+    s.registerAgent({ name: 'asker', repoPath: '/tmp/r', id: 'asker' });
+    s.registerAgent({ name: 'obs', repoPath: '/tmp/r', id: 'obs', role: 'observer' });
+    s.registerAgent({ name: 'peer', repoPath: '/tmp/r', id: 'peer' });
+    const peer = s.pickEscalationPeer('/tmp/r', 'asker');
+    expect(peer?.id).toBe('peer');
   });
 });

@@ -106,11 +106,43 @@ export class AolClient {
   }
 
   // Convenience wrappers
-  registerAgent(input: { id?: string; name: string; repoPath: string; color?: string }) {
+  registerAgent(input: { id?: string; name: string; repoPath: string; color?: string; role?: 'agent' | 'observer' }) {
     return this.req('POST', '/api/agents', input);
   }
-  setOffline(agentId: string) {
-    return this.req('POST', `/api/agents/${encodeURIComponent(agentId)}/offline`);
+  setOffline(agentId: string, awayMessage?: string) {
+    return this.req('POST', `/api/agents/${encodeURIComponent(agentId)}/offline`, awayMessage ? { awayMessage } : {});
+  }
+  deleteAgent(agentId: string) {
+    return this.req('DELETE', `/api/agents/${encodeURIComponent(agentId)}`);
+  }
+  listReusableAgents(repoPath: string) {
+    const qs = new URLSearchParams({ repoPath });
+    return this.req('GET', `/api/agents/reusable?${qs}`);
+  }
+  findObserver(repoPath: string) {
+    const qs = new URLSearchParams({ repoPath });
+    return this.req('GET', `/api/observer?${qs}`);
+  }
+  getInbox(agentId: string, since?: number) {
+    const qs = new URLSearchParams({ agentId });
+    if (since) qs.set('since', String(since));
+    return this.req('GET', `/api/inbox?${qs}`);
+  }
+  getInboxSummary(agentId: string, since = 0) {
+    const qs = new URLSearchParams({ agentId, since: String(since) });
+    return this.req('GET', `/api/inbox-summary?${qs}`);
+  }
+  askObserver(input: { askerId: string; repoPath: string; question: string }) {
+    return this.req('POST', '/api/questions', input);
+  }
+  getQuestion(ticketId: string) {
+    return this.req('GET', `/api/questions/${encodeURIComponent(ticketId)}`);
+  }
+  suggestScreenNames(opts: { count?: number; repoPath?: string } = {}) {
+    const qs = new URLSearchParams();
+    if (opts.count) qs.set('count', String(opts.count));
+    if (opts.repoPath) qs.set('repoPath', opts.repoPath);
+    return this.req('GET', `/api/screen-names?${qs}`);
   }
   heartbeat(agentId: string) {
     return this.req('POST', `/api/agents/${encodeURIComponent(agentId)}/heartbeat`);
