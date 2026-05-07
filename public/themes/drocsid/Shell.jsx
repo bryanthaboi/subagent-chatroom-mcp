@@ -1,5 +1,5 @@
 /* global React */
-/* Drosid Shell — modern dark chat-app, fills viewport.
+/* Drocsid Shell — modern dark chat-app, fills viewport.
    Layout: server rail · channel sidebar · main · member list. */
 
 const { devlog, colorForName, avatarLetter, basename, tsHM, tsHMS, relTime } = window.AOL_DATA;
@@ -57,7 +57,7 @@ function Shell(props) {
     if (active === '__friends' && repos.length > 0) setActive(repos[0].repoPath);
   }, [repos.length]);
 
-  devlog('shell', 'drosid render', { active, repos: repos.length });
+  devlog('shell', 'drocsid render', { active, repos: repos.length });
 
   const allAgents = Object.values(agentsByRepo).flat();
   const byId = React.useMemo(() => {
