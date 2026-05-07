@@ -31,15 +31,26 @@ window.__AOL_BOOT_READY = new Promise((resolve) => {
     });
   }
 
-  function appendBabelScript(src) {
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.type = 'text/babel';
-      s.src = src;
-      s.addEventListener('load', resolve);
-      s.addEventListener('error', () => reject(new Error('failed to load ' + src)));
-      document.body.appendChild(s);
+  // @babel/standalone only auto-transforms <script type="text/babel"> tags
+  // found at its initial scan. Dynamically-appended ones are ignored. We
+  // fetch the JSX manually, transform it ourselves, then execute in global
+  // scope so window.AOL_THEME_SHELL / AOL_FALLBACK_SHELL get set.
+  async function loadBabelModule(src) {
+    const r = await fetch(src);
+    if (!r.ok) throw new Error('failed to fetch ' + src + ': ' + r.status);
+    const source = await r.text();
+    const Babel = window.Babel;
+    if (!Babel || typeof Babel.transform !== 'function') {
+      throw new Error('Babel/standalone not loaded');
+    }
+    const { code } = Babel.transform(source, {
+      presets: ['react'],
+      filename: src,
+      sourceMaps: 'inline',
     });
+    // Indirect eval = global scope. The transformed code uses createElement
+    // calls and assigns to window globals — no module wrapping required.
+    (0, eval)(code);
   }
 
   try {
@@ -61,11 +72,11 @@ window.__AOL_BOOT_READY = new Promise((resolve) => {
       await appendStylesheet(url);
     }
 
-    // 4. load fallback first (always), then active shell
-    await appendBabelScript('/fallback-shell.jsx');
+    // 4. load fallback first (always available), then active shell
+    await loadBabelModule('/fallback-shell.jsx');
     if (resolved.active.shellUrl && resolved.active.shellUrl !== '/fallback-shell.jsx') {
       try {
-        await appendBabelScript(resolved.active.shellUrl);
+        await loadBabelModule(resolved.active.shellUrl);
       } catch (e) {
         window.AOL_BOOT_ERROR = String(e);
         log('shell load failed; falling back', e);
@@ -85,7 +96,7 @@ window.__AOL_BOOT_READY = new Promise((resolve) => {
     window.AOL_BOOT_ERROR = String(err);
     log('boot failed', err);
     if (!window.AOL_FALLBACK_SHELL) {
-      try { await appendBabelScript('/fallback-shell.jsx'); } catch {}
+      try { await loadBabelModule('/fallback-shell.jsx'); } catch {}
     }
     window.__AOL_BOOT_RESOLVE();
   }
