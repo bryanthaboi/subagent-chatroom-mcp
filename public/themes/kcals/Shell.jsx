@@ -154,11 +154,18 @@ function Shell(props) {
   const [repoUnread, setRepoUnread] = React.useState({});
   const [dmUnread, setDmUnread] = React.useState({});
 
+  const [activityUnread, setActivityUnread] = React.useState(0);
+  const [claimsUnread, setClaimsUnread] = React.useState(0);
+
   const active = activeRaw;
   const setActive = React.useCallback((next) => {
     setActiveRaw(next);
     if (next.startsWith('dm:')) {
       setDmUnread((u) => ({ ...u, [next.slice(3)]: 0 }));
+    } else if (next === '__activity') {
+      setActivityUnread(0);
+    } else if (next === '__claims') {
+      setClaimsUnread(0);
     } else if (!next.startsWith('__')) {
       setRepoUnread((u) => ({ ...u, [next]: 0 }));
     }
@@ -216,6 +223,30 @@ function Shell(props) {
       prevDmLensRef.current[peerId] = list.length;
     }
   }, [dms, active, observerIds]);
+
+  // Activity / file-targets unread tracking
+  const prevActivityLenRef = React.useRef(0);
+  const activitySeededRef = React.useRef(false);
+  const CLAIM_KINDS = React.useMemo(() => new Set(['claim', 'release', 'complete']), []);
+  React.useEffect(() => {
+    if (!activitySeededRef.current) {
+      prevActivityLenRef.current = activity.length;
+      activitySeededRef.current = true;
+      return;
+    }
+    if (activity.length > prevActivityLenRef.current) {
+      const fresh = activity.slice(prevActivityLenRef.current);
+      if (active !== '__activity') {
+        setActivityUnread((u) => u + fresh.length);
+      }
+      const claimEvents = fresh.filter((e) => CLAIM_KINDS.has(e.kind)).length;
+      if (claimEvents > 0 && active !== '__claims') {
+        devlog('unread', 'claims +', claimEvents);
+        setClaimsUnread((u) => u + claimEvents);
+      }
+      prevActivityLenRef.current = activity.length;
+    }
+  }, [activity, active, CLAIM_KINDS]);
 
   React.useEffect(() => {
     if (!repoMenu) return;
@@ -283,6 +314,8 @@ function Shell(props) {
           observer={observer}
           totalDmUnread={totalDmUnread}
           totalRepoUnread={totalRepoUnread}
+          activityUnread={activityUnread}
+          claimsUnread={claimsUnread}
         />
         <Sidebar
           active={active}
@@ -291,6 +324,8 @@ function Shell(props) {
           agentsByRepo={agentsByRepo}
           repoUnread={repoUnread}
           dmUnread={dmUnread}
+          activityUnread={activityUnread}
+          claimsUnread={claimsUnread}
           onRepoContextMenu={(e, repo) => {
             e.preventDefault();
             setRepoMenu({ x: e.clientX, y: e.clientY, repo });
@@ -372,12 +407,12 @@ function RepoContextMenu({ x, y, repo, agents, onOpenChat, onHide }) {
   );
 }
 
-function NavRail({ section, onSection, observer, totalDmUnread = 0, totalRepoUnread = 0 }) {
+function NavRail({ section, onSection, observer, totalDmUnread = 0, totalRepoUnread = 0, activityUnread = 0, claimsUnread = 0 }) {
   const items = [
     { id: 'home', label: 'Home', icon: '⌂', badge: totalRepoUnread },
     { id: 'dms', label: 'DMs', icon: '✉', badge: totalDmUnread },
-    { id: 'activity', label: 'Activity', icon: '🔔', badge: 0 },
-    { id: 'files', label: 'Files', icon: '📁', badge: 0 },
+    { id: 'activity', label: 'Activity', icon: '🔔', badge: activityUnread },
+    { id: 'files', label: 'Files', icon: '📁', badge: claimsUnread },
     { id: 'settings', label: 'Settings', icon: '⚙', badge: 0 },
   ];
   return (
@@ -413,7 +448,7 @@ function NavRail({ section, onSection, observer, totalDmUnread = 0, totalRepoUnr
   );
 }
 
-function Sidebar({ active, onPick, repos, agentsByRepo, repoUnread = {}, dmUnread = {}, onRepoContextMenu }) {
+function Sidebar({ active, onPick, repos, agentsByRepo, repoUnread = {}, dmUnread = {}, activityUnread = 0, claimsUnread = 0, onRepoContextMenu }) {
   const [showChannels, setShowChannels] = React.useState(true);
   const [showDms, setShowDms] = React.useState(true);
 
@@ -432,11 +467,15 @@ function Sidebar({ active, onPick, repos, agentsByRepo, repoUnread = {}, dmUnrea
         <div className="name">Agents Online <span style={{ fontSize: 10, color: 'var(--kc-text-mute)' }}>▾</span></div>
       </div>
       <div className="kc-side-list">
-        <button className="kc-quick-row" onClick={() => onPick('__activity')}>
+        <button className="kc-quick-row" onClick={() => onPick('__activity')}
+                style={activityUnread > 0 && active !== '__activity' ? { color: 'var(--kc-text-bright)', fontWeight: 700 } : undefined}>
           <span className="ico">⚡</span><span>Activity</span>
+          {activityUnread > 0 && <UnreadPill n={activityUnread} />}
         </button>
-        <button className="kc-quick-row" onClick={() => onPick('__claims')}>
+        <button className="kc-quick-row" onClick={() => onPick('__claims')}
+                style={claimsUnread > 0 && active !== '__claims' ? { color: 'var(--kc-text-bright)', fontWeight: 700 } : undefined}>
           <span className="ico">📁</span><span>File Targets</span>
+          {claimsUnread > 0 && <UnreadPill n={claimsUnread} />}
         </button>
         <button className="kc-quick-row" onClick={() => onPick('__settings')}>
           <span className="ico">⚙</span><span>Settings</span>

@@ -69,12 +69,19 @@ function Shell(props) {
   const [repoUnread, setRepoUnread] = React.useState({}); // { [repoPath]: count }
   const [dmUnread, setDmUnread] = React.useState({});     // { [agentId]: count }
 
+  const [activityUnread, setActivityUnread] = React.useState(0);
+  const [claimsUnread, setClaimsUnread] = React.useState(0);
+
   // setActive that resets the unread counter for whatever you're switching INTO.
   const active = activeRaw;
   const setActive = React.useCallback((next) => {
     setActiveRaw(next);
     if (next.startsWith('dm:')) {
       setDmUnread((u) => ({ ...u, [next.slice(3)]: 0 }));
+    } else if (next === '__activity') {
+      setActivityUnread(0);
+    } else if (next === '__claims') {
+      setClaimsUnread(0);
     } else if (!next.startsWith('__')) {
       setRepoUnread((u) => ({ ...u, [next]: 0 }));
     }
@@ -133,6 +140,30 @@ function Shell(props) {
       prevDmLensRef.current[peerId] = list.length;
     }
   }, [dms, active, observerIds]);
+
+  // Activity / file-targets unread tracking — same first-sight discipline.
+  const prevActivityLenRef = React.useRef(0);
+  const activitySeededRef = React.useRef(false);
+  const CLAIM_KINDS = React.useMemo(() => new Set(['claim', 'release', 'complete']), []);
+  React.useEffect(() => {
+    if (!activitySeededRef.current) {
+      prevActivityLenRef.current = activity.length;
+      activitySeededRef.current = true;
+      return;
+    }
+    if (activity.length > prevActivityLenRef.current) {
+      const fresh = activity.slice(prevActivityLenRef.current);
+      if (active !== '__activity') {
+        setActivityUnread((u) => u + fresh.length);
+      }
+      const claimEvents = fresh.filter((e) => CLAIM_KINDS.has(e.kind)).length;
+      if (claimEvents > 0 && active !== '__claims') {
+        devlog('unread', 'claims +', claimEvents);
+        setClaimsUnread((u) => u + claimEvents);
+      }
+      prevActivityLenRef.current = activity.length;
+    }
+  }, [activity, active, CLAIM_KINDS]);
 
   // Close the menu on any click anywhere. (Don't close on contextmenu — the
   // same right-click that opened the menu would otherwise close it.)
@@ -199,6 +230,8 @@ function Shell(props) {
         onPickSettings={() => setActive('__settings')}
         observer={observer}
         totalDmUnread={totalDmUnread}
+        activityUnread={activityUnread}
+        claimsUnread={claimsUnread}
       />
       <Sidebar
         active={active}
@@ -209,6 +242,8 @@ function Shell(props) {
         settings={settings}
         repoUnread={repoUnread}
         dmUnread={dmUnread}
+        activityUnread={activityUnread}
+        claimsUnread={claimsUnread}
         onRepoContextMenu={(e, repo) => {
           e.preventDefault();
           setRepoMenu({ x: e.clientX, y: e.clientY, repo });
@@ -297,7 +332,7 @@ function RepoContextMenu({ x, y, repo, agents, onOpenChat, onHide }) {
   );
 }
 
-function Rail({ active, onPickFriends, onPickServer, onPickActivity, onPickClaims, onPickSettings, observer, totalDmUnread }) {
+function Rail({ active, onPickFriends, onPickServer, onPickActivity, onPickClaims, onPickSettings, observer, totalDmUnread, activityUnread = 0, claimsUnread = 0 }) {
   const onDmView = active === '__friends' || active.startsWith('dm:');
   return (
     <div className="ds-rail">
@@ -316,12 +351,16 @@ function Rail({ active, onPickFriends, onPickServer, onPickActivity, onPickClaim
       <div className={`ds-rail-item ${active === '__activity' ? 'active' : ''}`}
            style={{ fontSize: 16 }}
            onClick={onPickActivity}>
-        ⚡<span className="ds-rail-tip">Activity</span>
+        ⚡
+        {activityUnread > 0 && <span className="ds-rail-badge">{activityUnread}</span>}
+        <span className="ds-rail-tip">Activity{activityUnread > 0 ? ` · ${activityUnread} new` : ''}</span>
       </div>
       <div className={`ds-rail-item ${active === '__claims' ? 'active' : ''}`}
            style={{ fontSize: 16 }}
            onClick={onPickClaims}>
-        📁<span className="ds-rail-tip">File Claims</span>
+        📁
+        {claimsUnread > 0 && <span className="ds-rail-badge">{claimsUnread}</span>}
+        <span className="ds-rail-tip">File Claims{claimsUnread > 0 ? ` · ${claimsUnread} new` : ''}</span>
       </div>
       <div className="ds-rail-divider"></div>
       <div className={`ds-rail-item ${active === '__settings' ? 'active' : ''}`}
@@ -333,7 +372,7 @@ function Rail({ active, onPickFriends, onPickServer, onPickActivity, onPickClaim
   );
 }
 
-function Sidebar({ active, onPick, repos, agentsByRepo, observer, settings, repoUnread, dmUnread, onRepoContextMenu }) {
+function Sidebar({ active, onPick, repos, agentsByRepo, observer, settings, repoUnread, dmUnread, activityUnread = 0, claimsUnread = 0, onRepoContextMenu }) {
   // DM home view: list all repos' agents (deduped) so the user can DM anyone.
   if (active === '__friends' || active.startsWith('dm:')) {
     const allAgents = [];
@@ -413,12 +452,18 @@ function Sidebar({ active, onPick, repos, agentsByRepo, observer, settings, repo
         })}
         <div className="ds-sidebar-section"><span>Observability</span></div>
         <div className={`ds-channel-row ${active === '__activity' ? 'active' : ''}`}
-             onClick={() => onPick('__activity')}>
-          <span className="hash">#</span><span className="name">activity</span>
+             onClick={() => onPick('__activity')}
+             style={activityUnread > 0 && active !== '__activity' ? { color: 'var(--text-bright)' } : undefined}>
+          <span className="hash">#</span>
+          <span className="name" style={activityUnread > 0 && active !== '__activity' ? { fontWeight: 600 } : undefined}>activity</span>
+          {activityUnread > 0 && <UnreadPill n={activityUnread} />}
         </div>
         <div className={`ds-channel-row ${active === '__claims' ? 'active' : ''}`}
-             onClick={() => onPick('__claims')}>
-          <span className="hash">#</span><span className="name">file-targets</span>
+             onClick={() => onPick('__claims')}
+             style={claimsUnread > 0 && active !== '__claims' ? { color: 'var(--text-bright)' } : undefined}>
+          <span className="hash">#</span>
+          <span className="name" style={claimsUnread > 0 && active !== '__claims' ? { fontWeight: 600 } : undefined}>file-targets</span>
+          {claimsUnread > 0 && <UnreadPill n={claimsUnread} />}
         </div>
       </div>
       <UserPill observer={observer} settings={settings} onPickSettings={() => onPick('__settings')} />
