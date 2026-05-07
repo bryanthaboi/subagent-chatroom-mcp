@@ -30,7 +30,7 @@ function ConnectTile({ src, alt, lit }) {
   );
 }
 
-function ConnectingScreen({ progress, statusText, onCancel, logoSrc = 'agentsonlinelogo.png' }) {
+function ConnectingScreen({ progress, statusText, onCancel, logoSrc = '/themes/bundled/aol/assets/agentsonlinelogo.png' }) {
   const lit1 = progress >= 25;
   const lit2 = progress >= 55;
   const lit3 = progress >= 85;
@@ -42,9 +42,9 @@ function ConnectingScreen({ progress, statusText, onCancel, logoSrc = 'agentsonl
           <div className="signon-connecting">
             <img src={logoSrc} className="connect-logo" alt="Agents Online" />
             <div className="connect-tiles">
-              <ConnectTile src="connect1.jpg" alt="connect 1" lit={lit1} />
-              <ConnectTile src="connect2.jpg" alt="connect 2" lit={lit2} />
-              <ConnectTile src="connect3.jpg" alt="connect 3" lit={lit3} />
+              <ConnectTile src="/themes/bundled/aol/assets/connect1.jpg" alt="connect 1" lit={lit1} />
+              <ConnectTile src="/themes/bundled/aol/assets/connect2.jpg" alt="connect 2" lit={lit2} />
+              <ConnectTile src="/themes/bundled/aol/assets/connect3.jpg" alt="connect 3" lit={lit3} />
             </div>
             <div className="connect-baseline" style={{ position: 'relative' }}>
               <div style={{
@@ -62,7 +62,7 @@ function ConnectingScreen({ progress, statusText, onCancel, logoSrc = 'agentsonl
   );
 }
 
-function SignOnForm({ onSubmit, screenName = 'observer', logoSrc = 'agentsonlinelogo.png' }) {
+function SignOnForm({ onSubmit, screenName = 'observer', logoSrc = '/themes/bundled/aol/assets/agentsonlinelogo.png' }) {
   return (
     <div className="signon-overlay">
       <div className="signon-window">
@@ -116,7 +116,7 @@ function SignOn({ onDone, screenName = 'observer' }) {
     if (stage !== 'connecting') return;
     let audio = null;
     try {
-      audio = new Audio('connect.mp3');
+      audio = new Audio('/themes/bundled/aol/assets/connect.mp3');
       audio.play().catch(() => {});
     } catch (e) {}
     let i = 0;

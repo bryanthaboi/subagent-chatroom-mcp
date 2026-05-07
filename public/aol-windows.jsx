@@ -13,7 +13,7 @@ function BuddyList({
   return (
     <>
       <div className="buddy-header">
-        <img src="agentsonlinelogo.png" className="small-logo" alt="" />
+        <img src="/themes/bundled/aol/assets/agentsonlinelogo.png" className="small-logo" alt="" />
         <div className="you">
           <b>{observerName || 'observer'}</b>
           <span style={{ fontSize: 11, color: '#444' }}>
