@@ -81,18 +81,30 @@ function Shell(props) {
   }, []);
 
   // Track new incoming messages; bump unread counters when the user isn't
-  // currently looking at that repo / DM.
+  // currently looking at that repo / DM. On the very first effect run we
+  // snapshot lengths of *existing* keys (so pre-mount scrollback doesn't
+  // explode the counter), but any key that appears LATER counts from 0.
   const observerIds = React.useMemo(() => new Set([observer.id].filter(Boolean)), [observer.id]);
   const prevRepoLensRef = React.useRef({});
   const prevDmLensRef = React.useRef({});
+  const repoSeededRef = React.useRef(false);
+  const dmSeededRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (!repoSeededRef.current) {
+      for (const [repoPath, list] of Object.entries(messagesByRepo)) {
+        prevRepoLensRef.current[repoPath] = list.length;
+      }
+      repoSeededRef.current = true;
+      return;
+    }
     for (const [repoPath, list] of Object.entries(messagesByRepo)) {
-      const prev = prevRepoLensRef.current[repoPath] ?? list.length; // first sight: don't count as new
+      const prev = prevRepoLensRef.current[repoPath] ?? 0;
       if (list.length > prev) {
         const fresh = list.slice(prev);
         const inbound = fresh.filter((m) => !observerIds.has(m.from)).length;
         if (inbound > 0 && active !== repoPath) {
+          devlog('unread', 'repo +', inbound, repoPath);
           setRepoUnread((u) => ({ ...u, [repoPath]: (u[repoPath] || 0) + inbound }));
         }
       }
@@ -101,12 +113,20 @@ function Shell(props) {
   }, [messagesByRepo, active, observerIds]);
 
   React.useEffect(() => {
+    if (!dmSeededRef.current) {
+      for (const [peerId, list] of Object.entries(dms)) {
+        prevDmLensRef.current[peerId] = list.length;
+      }
+      dmSeededRef.current = true;
+      return;
+    }
     for (const [peerId, list] of Object.entries(dms)) {
-      const prev = prevDmLensRef.current[peerId] ?? list.length;
+      const prev = prevDmLensRef.current[peerId] ?? 0;
       if (list.length > prev) {
         const fresh = list.slice(prev);
         const inbound = fresh.filter((m) => !observerIds.has(m.from)).length;
         if (inbound > 0 && active !== 'dm:' + peerId) {
+          devlog('unread', 'dm +', inbound, peerId);
           setDmUnread((u) => ({ ...u, [peerId]: (u[peerId] || 0) + inbound }));
         }
       }
