@@ -16,6 +16,33 @@ const STATUS_LABEL = {
   abandoned: 'abandoned',
 };
 
+// Sort agents: online first, offline+away last; within each group, agents
+// with unread DMs first, then alphabetical.
+const ONLINE_STATUSES = new Set(['online', 'idle', 'editing', 'reviewing', 'waiting', 'complete']);
+function sortAgents(agents, dmUnread = {}) {
+  return [...agents].sort((a, b) => {
+    const aOn = ONLINE_STATUSES.has(a.status);
+    const bOn = ONLINE_STATUSES.has(b.status);
+    if (aOn !== bOn) return aOn ? -1 : 1;
+    const aU = (dmUnread[a.id] || 0) > 0 ? 1 : 0;
+    const bU = (dmUnread[b.id] || 0) > 0 ? 1 : 0;
+    if (aU !== bU) return bU - aU;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+}
+
+function UnreadPill({ n }) {
+  return (
+    <span style={{
+      background: 'var(--kc-red)', color: '#fff',
+      fontSize: 11, fontWeight: 700,
+      padding: '1px 6px', borderRadius: 10,
+      minWidth: 18, textAlign: 'center', lineHeight: 1.4,
+      flexShrink: 0,
+    }}>{n}</span>
+  );
+}
+
 function Avatar({ name, color, size = 'md', status }) {
   const px = size === 'lg' ? 36 : size === 'mini' ? 20 : 28;
   const dotCls = status ? STATUS_DOT[status] || 'dt-idle' : null;
@@ -120,19 +147,71 @@ function Shell(props) {
   } = props;
 
   // Active selection: a repoPath, '__activity', '__claims', '__settings', '__friends', or 'dm:<agentId>'
-  const [active, setActive] = React.useState(() => repos[0]?.repoPath ?? '__friends');
+  const [activeRaw, setActiveRaw] = React.useState(() => repos[0]?.repoPath ?? '__friends');
   // Rail section ('home', 'dms', 'activity', 'files', 'settings').
   const [section, setSection] = React.useState('home');
   const [repoMenu, setRepoMenu] = React.useState(null); // { x, y, repo } | null
+  const [repoUnread, setRepoUnread] = React.useState({});
+  const [dmUnread, setDmUnread] = React.useState({});
 
-  // Close the menu on any click anywhere. (Don't close on contextmenu — the
-  // same right-click that opened the menu would otherwise close it.)
+  const active = activeRaw;
+  const setActive = React.useCallback((next) => {
+    setActiveRaw(next);
+    if (next.startsWith('dm:')) {
+      setDmUnread((u) => ({ ...u, [next.slice(3)]: 0 }));
+    } else if (!next.startsWith('__')) {
+      setRepoUnread((u) => ({ ...u, [next]: 0 }));
+    }
+  }, []);
+
+  // New-message tracking: bump unread when active doesn't match the target.
+  const observerIds = React.useMemo(() => new Set([observer.id].filter(Boolean)), [observer.id]);
+  const prevRepoLensRef = React.useRef({});
+  const prevDmLensRef = React.useRef({});
+
+  React.useEffect(() => {
+    for (const [repoPath, list] of Object.entries(messagesByRepo)) {
+      const prev = prevRepoLensRef.current[repoPath] ?? list.length;
+      if (list.length > prev) {
+        const fresh = list.slice(prev);
+        const inbound = fresh.filter((m) => !observerIds.has(m.from)).length;
+        if (inbound > 0 && active !== repoPath) {
+          setRepoUnread((u) => ({ ...u, [repoPath]: (u[repoPath] || 0) + inbound }));
+        }
+      }
+      prevRepoLensRef.current[repoPath] = list.length;
+    }
+  }, [messagesByRepo, active, observerIds]);
+
+  React.useEffect(() => {
+    for (const [peerId, list] of Object.entries(dms)) {
+      const prev = prevDmLensRef.current[peerId] ?? list.length;
+      if (list.length > prev) {
+        const fresh = list.slice(prev);
+        const inbound = fresh.filter((m) => !observerIds.has(m.from)).length;
+        if (inbound > 0 && active !== 'dm:' + peerId) {
+          setDmUnread((u) => ({ ...u, [peerId]: (u[peerId] || 0) + inbound }));
+        }
+      }
+      prevDmLensRef.current[peerId] = list.length;
+    }
+  }, [dms, active, observerIds]);
+
   React.useEffect(() => {
     if (!repoMenu) return;
     const close = () => setRepoMenu(null);
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, [repoMenu]);
+
+  const totalDmUnread = React.useMemo(
+    () => Object.values(dmUnread).reduce((a, b) => a + b, 0),
+    [dmUnread]
+  );
+  const totalRepoUnread = React.useMemo(
+    () => Object.values(repoUnread).reduce((a, b) => a + b, 0),
+    [repoUnread]
+  );
 
   React.useEffect(() => {
     if (active.startsWith('__')) return;
@@ -182,12 +261,16 @@ function Shell(props) {
             else if (s === 'dms') setActive('__friends');
           }}
           observer={observer}
+          totalDmUnread={totalDmUnread}
+          totalRepoUnread={totalRepoUnread}
         />
         <Sidebar
           active={active}
           onPick={setActive}
           repos={repos}
           agentsByRepo={agentsByRepo}
+          repoUnread={repoUnread}
+          dmUnread={dmUnread}
           onRepoContextMenu={(e, repo) => {
             e.preventDefault();
             setRepoMenu({ x: e.clientX, y: e.clientY, repo });
@@ -207,6 +290,7 @@ function Shell(props) {
           claims={claims}
           settings={settings}
           themes={themes}
+          dmUnread={dmUnread}
           onChangeSettings={setSettings}
           onOpenDM={(agent) => setActive('dm:' + agent.id)}
         />
@@ -268,13 +352,13 @@ function RepoContextMenu({ x, y, repo, agents, onOpenChat, onHide }) {
   );
 }
 
-function NavRail({ section, onSection, observer }) {
+function NavRail({ section, onSection, observer, totalDmUnread = 0, totalRepoUnread = 0 }) {
   const items = [
-    { id: 'home', label: 'Home', icon: '⌂' },
-    { id: 'dms', label: 'DMs', icon: '✉' },
-    { id: 'activity', label: 'Activity', icon: '🔔' },
-    { id: 'files', label: 'Files', icon: '📁' },
-    { id: 'settings', label: 'Settings', icon: '⚙' },
+    { id: 'home', label: 'Home', icon: '⌂', badge: totalRepoUnread },
+    { id: 'dms', label: 'DMs', icon: '✉', badge: totalDmUnread },
+    { id: 'activity', label: 'Activity', icon: '🔔', badge: 0 },
+    { id: 'files', label: 'Files', icon: '📁', badge: 0 },
+    { id: 'settings', label: 'Settings', icon: '⚙', badge: 0 },
   ];
   return (
     <div className="kc-rail">
@@ -285,6 +369,16 @@ function NavRail({ section, onSection, observer }) {
                 onClick={() => onSection(i.id)}>
           <div className="kc-nav-icon">{i.icon}</div>
           <div className="kc-nav-label">{i.label}</div>
+          {i.badge > 0 && (
+            <span style={{
+              position: 'absolute', top: 2, right: 8,
+              background: 'var(--kc-red)', color: '#fff',
+              fontSize: 10, fontWeight: 700,
+              padding: '1px 5px', borderRadius: 8,
+              minWidth: 16, textAlign: 'center',
+              border: '2px solid var(--kc-rail-bg)',
+            }}>{i.badge}</span>
+          )}
         </button>
       ))}
       <div className="kc-nav-spacer"></div>
@@ -299,7 +393,7 @@ function NavRail({ section, onSection, observer }) {
   );
 }
 
-function Sidebar({ active, onPick, repos, agentsByRepo, onRepoContextMenu }) {
+function Sidebar({ active, onPick, repos, agentsByRepo, repoUnread = {}, dmUnread = {}, onRepoContextMenu }) {
   const [showChannels, setShowChannels] = React.useState(true);
   const [showDms, setShowDms] = React.useState(true);
 
@@ -310,6 +404,7 @@ function Sidebar({ active, onPick, repos, agentsByRepo, onRepoContextMenu }) {
       if (!seen.has(a.id)) { seen.add(a.id); allAgents.push(a); }
     }
   }
+  const sortedDms = sortAgents(allAgents, dmUnread);
 
   return (
     <div className="kc-side">
@@ -336,37 +431,49 @@ function Sidebar({ active, onPick, repos, agentsByRepo, onRepoContextMenu }) {
             No repos yet.
           </div>
         )}
-        {showChannels && repos.map((r) => (
-          <button key={r.repoPath}
-                  className={`kc-chan-row ${active === r.repoPath ? 'active' : ''}`}
-                  onClick={() => onPick(r.repoPath)}
-                  onContextMenu={(e) => onRepoContextMenu && onRepoContextMenu(e, r)}
-                  title="right-click for options">
-            <span className="icn">#</span>
-            <span className="name">{r.basename}</span>
-          </button>
-        ))}
+        {showChannels && repos.map((r) => {
+          const unread = repoUnread[r.repoPath] || 0;
+          const isActive = active === r.repoPath;
+          return (
+            <button key={r.repoPath}
+                    className={`kc-chan-row ${isActive ? 'active' : ''}`}
+                    onClick={() => onPick(r.repoPath)}
+                    onContextMenu={(e) => onRepoContextMenu && onRepoContextMenu(e, r)}
+                    title="right-click for options"
+                    style={unread > 0 && !isActive ? { color: 'var(--kc-text-bright)' } : undefined}>
+              <span className="icn">#</span>
+              <span className="name" style={unread > 0 && !isActive ? { fontWeight: 700 } : undefined}>{r.basename}</span>
+              {unread > 0 && <UnreadPill n={unread} />}
+            </button>
+          );
+        })}
 
         <button className="kc-side-section" onClick={() => setShowDms((s) => !s)}>
           <span className="caret">{showDms ? '▾' : '▸'}</span>
           <span className="label">Direct messages</span>
         </button>
-        {showDms && allAgents.length === 0 && (
+        {showDms && sortedDms.length === 0 && (
           <div style={{ padding: '4px 16px', fontSize: 12, color: 'var(--kc-text-mute)' }}>
             No agents online.
           </div>
         )}
-        {showDms && allAgents.map((a) => (
-          <button key={a.id}
-                  className={`kc-sd-dm ${active === 'dm:' + a.id ? 'active' : ''}`}
-                  onClick={() => onPick('dm:' + a.id)}>
-            <div className="av" style={{ background: a.color || colorForName(a.name) }}>
-              {avatarLetter(a.name)}
-              <span className={`dt ${STATUS_DOT[a.status] || 'dt-idle'}`}></span>
-            </div>
-            <span className="name">{a.name}</span>
-          </button>
-        ))}
+        {showDms && sortedDms.map((a) => {
+          const unread = dmUnread[a.id] || 0;
+          const isActive = active === 'dm:' + a.id;
+          return (
+            <button key={a.id}
+                    className={`kc-sd-dm ${isActive ? 'active' : ''}`}
+                    onClick={() => onPick('dm:' + a.id)}
+                    style={unread > 0 && !isActive ? { color: 'var(--kc-text-bright)' } : undefined}>
+              <div className="av" style={{ background: a.color || colorForName(a.name) }}>
+                {avatarLetter(a.name)}
+                <span className={`dt ${STATUS_DOT[a.status] || 'dt-idle'}`}></span>
+              </div>
+              <span className="name" style={unread > 0 && !isActive ? { fontWeight: 700 } : undefined}>{a.name}</span>
+              {unread > 0 && <UnreadPill n={unread} />}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -512,28 +619,56 @@ function DMView({ dmAgent, dmLog, byId, sendActive, observer }) {
   );
 }
 
-function FriendsView({ allAgents, onOpenDM }) {
+function FriendsView({ allAgents, onOpenDM, dmUnread = {} }) {
+  const sorted = sortAgents(allAgents, dmUnread);
   return (
     <div className="kc-main">
       <div className="kc-chan-header"><div className="title"><span>👥 Friends</span></div></div>
       <div className="kc-info-panel">
-        {allAgents.length === 0 && <div style={{ color: 'var(--kc-text-mute)' }}>No agents have registered yet.</div>}
-        {allAgents.map((a) => (
-          <div key={a.id} style={{
-            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
-            borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer',
-          }} onClick={() => onOpenDM(a)}>
-            <Avatar name={a.name} color={a.color} status={a.status} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: 'var(--kc-text-bright)', fontSize: 14, fontWeight: 700 }}>{a.name}</div>
-              <div style={{ color: 'var(--kc-text-mute)', fontSize: 12 }}>
-                {STATUS_LABEL[a.status] || a.status}
-                {a.currentFile ? ' · ' + basename(a.currentFile) : ''}
-                {' · '}{basename(a.repoPath)}
+        {sorted.length === 0 && <div style={{ color: 'var(--kc-text-mute)' }}>No agents have registered yet.</div>}
+        {sorted.map((a) => {
+          const unread = dmUnread[a.id] || 0;
+          return (
+            <div key={a.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
+              borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer',
+            }} onClick={() => onOpenDM(a)}>
+              <Avatar name={a.name} color={a.color} status={a.status} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: 'var(--kc-text-bright)', fontSize: 14, fontWeight: 700 }}>{a.name}</div>
+                <div style={{ color: 'var(--kc-text-mute)', fontSize: 12 }}>
+                  {STATUS_LABEL[a.status] || a.status}
+                  {a.currentFile ? ' · ' + basename(a.currentFile) : ''}
+                  {' · '}{basename(a.repoPath)}
+                </div>
               </div>
+              <button
+                className="kc-icon-btn"
+                style={{
+                  width: 36, height: 28,
+                  background: unread > 0 ? 'var(--kc-red)' : 'transparent',
+                  color: unread > 0 ? '#fff' : 'var(--kc-text-mute)',
+                  position: 'relative',
+                  borderRadius: 6,
+                }}
+                title={unread > 0 ? `${unread} unread` : 'Message'}
+                onClick={(e) => { e.stopPropagation(); onOpenDM(a); }}
+              >
+                💬
+                {unread > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -4, right: -4,
+                    background: 'var(--kc-red)', color: '#fff',
+                    fontSize: 10, fontWeight: 700,
+                    padding: '0 5px', borderRadius: 8,
+                    border: '2px solid var(--kc-main-bg)',
+                    minWidth: 16, textAlign: 'center',
+                  }}>{unread}</span>
+                )}
+              </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

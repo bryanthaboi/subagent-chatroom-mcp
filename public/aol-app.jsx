@@ -139,7 +139,30 @@ function App() {
         const list = m[message.repoPath] || [];
         return { ...m, [message.repoPath]: [...list, message] };
       });
-      if (!fromSelf) AudioFx.imRecv();
+      if (!fromSelf) {
+        // Pop the chat window open if closed (or bump z if already open),
+        // mirroring AIM-style DM popups for room messages.
+        setChatWindows(w => {
+          const existing = w[message.repoPath];
+          if (existing?.open) {
+            return { ...w, [message.repoPath]: { ...existing, z: zCounter + 1 } };
+          }
+          const count = Object.keys(w).length;
+          return {
+            ...w,
+            [message.repoPath]: {
+              x: existing?.x ?? (360 + count * 24),
+              y: existing?.y ?? (56 + count * 24),
+              w: existing?.w ?? 540,
+              h: existing?.h ?? 380,
+              open: true,
+              z: zCounter + 1,
+            },
+          };
+        });
+        setZCounter(z => z + 1);
+        AudioFx.imRecv();
+      }
       return;
     }
     // DM — file under the other party id
