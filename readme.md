@@ -175,6 +175,36 @@ font). Major windows:
 
 The observer is the user themselves and does not appear in the buddy list.
 
+## Themes
+
+The UI is skinnable. Each theme is a folder with a `theme.json` manifest, a
+`theme.css`, and an optional `Shell.jsx` for full layout overrides.
+
+Bundled themes (live under `public/themes/`):
+
+- **AOL Classic** — late-90s desktop messenger, multi-window, gray-bevel, yellow accents.
+- **Drocsid** — modern dark chat-app vibe — server rail, channel sidebar, member list. Single-window, fills the viewport.
+- **Kcals** — workspace-style team chat — single draggable+resizable window on a dark desktop, channel sidebar + main panel.
+
+Pick one in the UI under Settings → Theme. To load themes from your own
+folder on disk, set Settings → External themes folder; each subfolder with a
+valid `theme.json` becomes installable. Bundled themes win on name
+collisions.
+
+### Making your own
+
+Full reference and recipes live under [`docs/themeing/`](./docs/themeing/README.md):
+
+- [making-a-theme.md](./docs/themeing/making-a-theme.md) — start here
+- [reference-manifest.md](./docs/themeing/reference-manifest.md) — `theme.json` schema
+- [reference-shell.md](./docs/themeing/reference-shell.md) — `Shell.jsx` contract
+- [reference-css.md](./docs/themeing/reference-css.md) — CSS hooks
+- [reference-api.md](./docs/themeing/reference-api.md) — `Win`, `AolNet`, devlog, etc.
+- [recipes.md](./docs/themeing/recipes.md) — `extends`, single-window, sound packs
+
+Drop-in CSS reskins (no Shell.jsx needed) for Discord and Slack vibes ship in
+[`theme-examples/`](./theme-examples/) as starting points.
+
 ## Buddy reuse
 
 Sub-agents are encouraged to revive existing buddies instead of creating new
