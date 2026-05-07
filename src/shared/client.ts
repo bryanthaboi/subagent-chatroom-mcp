@@ -209,4 +209,24 @@ export class AolClient {
   markAbandoned(agentId: string, body: { file?: string; summary?: string }) {
     return this.req('POST', `/api/agents/${encodeURIComponent(agentId)}/abandoned`, body);
   }
+
+  // ---------- Settings + Themes ----------
+  getSettings() {
+    return this.req<import('./types.js').Settings>('GET', '/api/settings');
+  }
+  setSettings(patch: Partial<import('./types.js').Settings>) {
+    return this.req<import('./types.js').Settings>('POST', '/api/settings', patch);
+  }
+  listThemes() {
+    return this.req<{ themes: import('./types.js').DiscoveredTheme[]; warnings: string[] }>(
+      'GET',
+      '/api/themes'
+    );
+  }
+  getResolvedTheme(name: string) {
+    return this.req<import('./types.js').ResolvedTheme>(
+      'GET',
+      `/api/themes/${encodeURIComponent(name)}/resolved`
+    );
+  }
 }

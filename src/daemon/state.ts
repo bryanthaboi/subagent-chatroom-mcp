@@ -233,7 +233,7 @@ export class State {
         try { out[r.key] = JSON.parse(r.value); } catch {}
       }
     }
-    return out as Settings;
+    return out as unknown as Settings;
   }
 
   getSetting<K extends keyof Settings>(key: K): Settings[K] {
