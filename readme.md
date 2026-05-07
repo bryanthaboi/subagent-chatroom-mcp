@@ -7,7 +7,8 @@ multiple sub-agents. It gives them a shared channel for intent, file claims,
 waits, direct messages, and a question-and-answer loop with a human observer
 so parallel work stays ordered and visible.
 
-## Status: implemented
+## Youtube Video demo and explanation:
+[![YouTube Video](https://img.youtube.com/vi/HOSwpCMIDVg/maxresdefault.jpg)](https://www.youtube.com/watch?v=HOSwpCMIDVg)
 
 The MCP server, daemon, real-time UI, install-skills CLI, and macOS launchd
 service all exist in this repo. See [DEPLOY.md](./DEPLOY.md) for setup and
