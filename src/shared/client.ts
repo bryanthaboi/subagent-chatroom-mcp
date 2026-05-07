@@ -194,6 +194,9 @@ export class AolClient {
   listRepos() {
     return this.req('GET', '/api/repos');
   }
+  hideRepo(repoPath: string) {
+    return this.req('POST', '/api/repos/hide', { repoPath });
+  }
   waitForRelease(input: { agentId: string; repoPath: string; file: string; timeoutMs?: number }) {
     return this.req('POST', '/api/wait', input);
   }

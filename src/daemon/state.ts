@@ -223,20 +223,25 @@ export class State {
   }
 
   // ---------- repos ----------
+  // Any new activity in a repo un-hides it. A previously hidden repo coming
+  // back to life (e.g. demo re-run after a wipe) should reappear in the
+  // buddy list immediately.
   private touchRepo(repoPath: string): void {
     const now = Date.now();
     const basename = repoBasename(repoPath);
     this.db
       .prepare(
-        `INSERT INTO repos (repo_path, basename, first_seen, last_seen)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(repo_path) DO UPDATE SET last_seen = excluded.last_seen`
+        `INSERT INTO repos (repo_path, basename, first_seen, last_seen, hidden)
+         VALUES (?, ?, ?, ?, 0)
+         ON CONFLICT(repo_path) DO UPDATE SET last_seen = excluded.last_seen, hidden = 0`
       )
       .run(repoPath, basename, now, now);
   }
 
   listRepos(): { repoPath: string; basename: string; agentCount: number }[] {
-    const rows = this.db.prepare(`SELECT * FROM repos ORDER BY repo_path`).all() as RepoRow[];
+    const rows = this.db
+      .prepare(`SELECT * FROM repos WHERE hidden = 0 ORDER BY repo_path`)
+      .all() as RepoRow[];
     const counts = this.db
       .prepare(
         `SELECT repo_path, COUNT(*) AS n FROM agents WHERE status NOT IN ('offline') GROUP BY repo_path`
@@ -248,6 +253,22 @@ export class State {
       basename: r.basename,
       agentCount: countMap.get(r.repo_path) ?? 0,
     }));
+  }
+
+  hideRepo(repoPath: string): { ok: true } | { ok: false; reason: string } {
+    const path = normalizeRepoPath(repoPath);
+    const repo = this.db.prepare(`SELECT 1 FROM repos WHERE repo_path = ?`).get(path);
+    if (!repo) return { ok: false, reason: 'repo not found' };
+    const liveCount = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM agents WHERE repo_path = ? AND role = 'agent' AND status != 'offline'`
+      )
+      .get(path) as { n: number };
+    if (liveCount.n > 0) {
+      return { ok: false, reason: 'repo has agents not yet offline' };
+    }
+    this.db.prepare(`UPDATE repos SET hidden = 1 WHERE repo_path = ?`).run(path);
+    return { ok: true };
   }
 
   // ---------- agents ----------
@@ -685,6 +706,23 @@ export class State {
       .prepare(`SELECT * FROM messages WHERE ${where.join(' AND ')} ORDER BY ts ASC`)
       .all(...params) as MessageRow[];
     return rows.map(rowToMessage);
+  }
+
+  /**
+   * Bulk-delete messages in a repo whose `from_id` or `to_id` matches any of
+   * the given agent ids. Returns rows affected. Used by the demo cleanup
+   * (Ctrl+Shift+B) to wipe a known set of demo agents' chat history.
+   */
+  wipeMessages(repoPath: string, agentIds: string[]): number {
+    if (agentIds.length === 0) return 0;
+    const placeholders = agentIds.map(() => '?').join(',');
+    const stmt = this.db.prepare(
+      `DELETE FROM messages
+        WHERE repo_path = ?
+          AND (from_id IN (${placeholders}) OR to_id IN (${placeholders}))`
+    );
+    const info = stmt.run(normalizeRepoPath(repoPath), ...agentIds, ...agentIds);
+    return info.changes;
   }
 
   getInbox(agentId: string, since: number): Message[] {

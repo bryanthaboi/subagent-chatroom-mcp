@@ -120,6 +120,7 @@ const AolNet = (() => {
       return j('POST', '/api/agents', { name, repoPath, role, color: '#000080' });
     },
     deleteAgent(id) { return j('DELETE', '/api/agents/' + encodeURIComponent(id)); },
+    hideRepo(repoPath) { return j('POST', '/api/repos/hide', { repoPath }); },
     heartbeat(id) { return j('POST', '/api/agents/' + encodeURIComponent(id) + '/heartbeat'); },
     beaconOffline(id) {
       try {

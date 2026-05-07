@@ -7,14 +7,16 @@ const { SignOn } = window.AOL_SIGNON;
 function App() {
   const [signedOn, setSignedOn] = React.useState(false);
   const [observer, setObserver] = React.useState({ name: 'observer', repoPath: null });
-  // Synchronous read of observer id — useState updates don't propagate before
+  // Synchronous read of observer ids — useState updates don't propagate before
   // SSE events arrive after a fresh registerObserver call.
-  const observerIdRef = React.useRef(null);
-  // Every observer record we've registered this session (one per repo we've
-  // touched). All of them get heartbeated, and all of them get beaconed offline
-  // when the browser closes — the observer is "online" only while the UI is open.
+  // Multiple observer records exist (one per repo), so we keep a Set of all
+  // ids and a Map for repo->id dedupe.
   const observerIdsRef = React.useRef(new Set());
-  React.useEffect(() => { observerIdRef.current = observer.id || null; }, [observer.id]);
+  const observerByRepoRef = React.useRef(new Map());
+  // Read-side caches so handleMessage can read latest values without
+  // re-creating the callback on every state update.
+  const agentsRef = React.useRef([]);
+  const dmWindowsRef = React.useRef({});
 
   // server-sourced state
   const [repos, setRepos] = React.useState([]);
@@ -40,8 +42,13 @@ function App() {
   const [activeWin, setActiveWin] = React.useState('buddies');
   const [soundsOn, setSoundsOn] = React.useState(true);
   const [errorBanner, setErrorBanner] = React.useState(null);
+  const demoRunningRef = React.useRef(false);
+  const demoCancelRef = React.useRef(false);
 
   React.useEffect(() => { AudioFx.setEnabled(soundsOn); }, [soundsOn]);
+  // Keep refs in sync with current state for use inside handleMessage.
+  React.useEffect(() => { agentsRef.current = agents; }, [agents]);
+  React.useEffect(() => { dmWindowsRef.current = dmWindows; }, [dmWindows]);
 
   const welcomedRef = React.useRef(false);
   React.useEffect(() => {
@@ -82,8 +89,8 @@ function App() {
   }, []);
 
   const handleMessage = React.useCallback((message) => {
-    const obsId = observerIdRef.current;
-    const fromSelf = obsId && message.from === obsId;
+    const observerIds = observerIdsRef.current;
+    const fromSelf = observerIds.has(message.from);
     if (message.to === null) {
       // room message — append to per-repo scrollback
       setMessagesByRepo(m => {
@@ -91,36 +98,54 @@ function App() {
         return { ...m, [message.repoPath]: [...list, message] };
       });
       if (!fromSelf) AudioFx.imRecv();
-    } else {
-      // DM — file under the other party id
-      const peerId = fromSelf ? message.to : message.from;
-      setDms(d => ({ ...d, [peerId]: [...(d[peerId] || []), message] }));
-      // Auto-reopen DM if addressed to observer
-      if (obsId && message.to === obsId) {
-        setDmWindows(w => ({
+      return;
+    }
+    // DM — file under the other party id
+    const peerId = fromSelf ? message.to : message.from;
+    setDms(d => ({ ...d, [peerId]: [...(d[peerId] || []), message] }));
+
+    if (fromSelf) return; // we sent it; nothing else to do.
+
+    // Is this DM addressed to a recipient we'd consider "us"? Three checks
+    // for resilience: (a) one of OUR session's observer ids, (b) any agent in
+    // the local list with role='observer' (covers stale observer records
+    // from other tabs/sessions), (c) we already have an open DM window for
+    // this peer (e.g. you opened the IM yourself, then they replied).
+    const recipient = agentsRef.current.find(a => a.id === message.to);
+    const recipientIsObserver = recipient?.role === 'observer';
+    const ours = observerIds.has(message.to);
+    const haveOpenWindow = !!dmWindowsRef.current[peerId]?.open;
+
+    if (ours || recipientIsObserver || haveOpenWindow) {
+      // Open the DM window (or just bump z if already open) and chime.
+      setDmWindows(w => {
+        const existing = w[peerId];
+        if (existing?.open) {
+          return { ...w, [peerId]: { ...existing, z: zCounter + 1 } };
+        }
+        return {
           ...w,
           [peerId]: {
-            x: w[peerId]?.x ?? 420,
-            y: w[peerId]?.y ?? 140,
-            w: w[peerId]?.w ?? 340,
-            h: w[peerId]?.h ?? 300,
+            x: existing?.x ?? 420,
+            y: existing?.y ?? 140,
+            w: existing?.w ?? 340,
+            h: existing?.h ?? 300,
             open: true,
             z: zCounter + 1,
           },
-        }));
-        setZCounter(z => z + 1);
-        AudioFx.imRecv();
-      } else if (!fromSelf) {
-        AudioFx.imRecv();
-      }
+        };
+      });
+      setZCounter(z => z + 1);
+      AudioFx.imRecv();
     }
+    // Else: sub-agent-to-sub-agent traffic — file silently, don't disturb.
   }, [zCounter]);
 
   const handleActivity = React.useCallback((event) => {
     setActivity((es) => [...es, event].slice(-300));
-    // Don't audibly chime when the event is about the observer themselves
-    // (e.g. lazy registration on first DM/room post).
-    if (event.agentId === observerIdRef.current) return;
+    // Don't audibly chime when the event is about an observer record
+    // (registration, heartbeat-driven offline, etc).
+    if (observerIdsRef.current.has(event.agentId)) return;
     if (event.kind === 'online') AudioFx.signon();
     if (event.kind === 'offline') AudioFx.signoff();
     if (event.kind === 'claim') AudioFx.workStart();
@@ -261,7 +286,7 @@ function App() {
     setActiveWin('dm:' + agent.id);
     if (!dms[agent.id]) {
       try {
-        const obsId = observerIdRef.current;
+        const obsId = observerByRepoRef.current.get(agent.repoPath);
         if (obsId) {
           const r = await AolNet.getMessages({ repoPath: agent.repoPath, peer: agent.id, agentId: obsId });
           setDms(d => ({ ...d, [agent.id]: r.messages || [] }));
@@ -278,15 +303,16 @@ function App() {
     setDmWindows(w => ({ ...w, [agentId]: { ...(w[agentId] || {}), open: false } }));
   };
 
-  // ----- observer registration (lazy, per repo) ---------------------------
+  // ----- observer registration (per repo, deduped via Map) ---------------
   const ensureObserverFor = async (repoPath) => {
-    if (observer.id && observer.repoPath === repoPath) return observer.id;
+    const cached = observerByRepoRef.current.get(repoPath);
+    if (cached) return cached;
     try {
       const r = await AolNet.registerObserver({ name: observer.name, repoPath, role: 'observer' });
       const id = r.agent.id;
-      // Update ref synchronously so SSE events arriving in the next tick see
-      // the new id immediately, before React re-renders.
-      observerIdRef.current = id;
+      // Update refs synchronously so SSE events arriving in the next tick
+      // already see the new id, before React re-renders.
+      observerByRepoRef.current.set(repoPath, id);
       observerIdsRef.current.add(id);
       setObserver(o => ({ ...o, id, repoPath }));
       return id;
@@ -295,6 +321,23 @@ function App() {
       throw e;
     }
   };
+
+  // Eagerly ensure an observer record exists in every repo we know about, so
+  // sub-agents can find us via aol_find_observer and DM us right away.
+  React.useEffect(() => {
+    if (!signedOn) return;
+    let cancelled = false;
+    (async () => {
+      for (const r of repos) {
+        if (cancelled) return;
+        if (!observerByRepoRef.current.has(r.repoPath)) {
+          await ensureObserverFor(r.repoPath).catch(() => {});
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedOn, repos]);
 
   // Heartbeat every observer record we've registered, so the daemon doesn't
   // flip them to offline as long as this UI tab is open.
@@ -324,6 +367,82 @@ function App() {
       window.removeEventListener('beforeunload', onUnload);
       window.removeEventListener('pagehide', onUnload);
     };
+  }, [signedOn]);
+
+  // Hidden keybindings:
+  //   Ctrl/Cmd+Shift+E — start the demo
+  //   Ctrl/Cmd+Shift+G — cancel a running demo
+  //   Ctrl/Cmd+Shift+B — wipe demo users + repo
+  // Ctrl+E alone is reserved by the browser (omnibox), so we add Shift on all.
+  React.useEffect(() => {
+    if (!signedOn) return;
+    const onKey = (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod || !e.shiftKey) return;
+      const k = (e.key || '').toLowerCase();
+      if (k === 'e') {
+        e.preventDefault();
+        if (demoRunningRef.current) return;
+        demoRunningRef.current = true;
+        demoCancelRef.current = false;
+        window.AOL_DEMO.run({
+          shouldCancel: () => demoCancelRef.current,
+          onError: (msg) => {
+            demoRunningRef.current = false;
+            setErrorBanner(msg);
+          },
+          onDone: () => {
+            demoRunningRef.current = false;
+            demoCancelRef.current = false;
+          },
+        });
+      } else if (k === 'g') {
+        e.preventDefault();
+        if (demoRunningRef.current) demoCancelRef.current = true;
+      } else if (k === 'b') {
+        e.preventDefault();
+        // Cancel any in-flight demo first so the wipe isn't racing the script.
+        if (demoRunningRef.current) demoCancelRef.current = true;
+        window.AOL_DEMO.deleteAll({
+          onError: (msg) => setErrorBanner(msg),
+          onDone: () => {
+            const repo = window.AOL_DEMO.DEMO_REPO;
+            const ids = window.AOL_DEMO.DEMO_IDS;
+            // Forget cached state for demo agents + repo.
+            setAgents(list => list.filter(a => !ids.includes(a.id)));
+            setChatWindows(w => {
+              if (!w[repo]) return w;
+              const copy = { ...w };
+              delete copy[repo];
+              return copy;
+            });
+            // Clear room scrollback for the demo repo.
+            setMessagesByRepo(m => {
+              if (!m[repo]) return m;
+              const copy = { ...m };
+              delete copy[repo];
+              return copy;
+            });
+            // Clear DM scrollback with each demo agent.
+            setDms(d => {
+              const copy = { ...d };
+              for (const id of ids) delete copy[id];
+              return copy;
+            });
+            // Close any DM windows for demo agents.
+            setDmWindows(w => {
+              const copy = { ...w };
+              for (const id of ids) delete copy[id];
+              return copy;
+            });
+            AolNet.listRepos().then(r => setRepos(r.repos || [])).catch(() => {});
+            AolNet.listAgents().then(r => setAgents(r.agents || [])).catch(() => {});
+          },
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [signedOn]);
 
   const sendRoom = async (repoPath, body) => {
@@ -360,6 +479,24 @@ function App() {
     if (!window.confirm(`Delete offline buddy ${agent.name}?`)) return;
     try { await AolNet.deleteAgent(agent.id); }
     catch (e) { setErrorBanner('delete failed: ' + e.message); }
+  };
+  const onHideRepo = async (repo) => {
+    if (!window.confirm(`Hide ${repo.basename} from the buddy list? It will reappear if any agent registers there again.`)) return;
+    try {
+      await AolNet.hideRepo(repo.repoPath);
+      // Close any open chat window for that repo.
+      setChatWindows(w => {
+        if (!w[repo.repoPath]) return w;
+        const copy = { ...w };
+        delete copy[repo.repoPath];
+        return copy;
+      });
+      // Refresh repo list.
+      const r = await AolNet.listRepos();
+      setRepos(r.repos || []);
+    } catch (e) {
+      setErrorBanner('hide failed: ' + e.message);
+    }
   };
 
   if (!signedOn) {
@@ -414,6 +551,7 @@ function App() {
                 onOpenLog={() => openWin('log')}
                 onOpenAbout={() => openWin('about')}
                 onDelete={onDelete}
+                onHideRepo={onHideRepo}
               />
             </Win>
           </div>

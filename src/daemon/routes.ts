@@ -350,6 +350,26 @@ export async function handleApi(
       return send(res, 200, { repos: state.listRepos() });
     }
 
+    if (p === '/api/messages/wipe' && method === 'POST') {
+      const body = await readJson(req);
+      if (!body.repoPath || !Array.isArray(body.agentIds)) {
+        return send(res, 400, { error: 'repoPath and agentIds[] required' });
+      }
+      const n = state.wipeMessages(body.repoPath, body.agentIds);
+      return send(res, 200, { deleted: n });
+    }
+
+    if (p === '/api/repos/hide' && method === 'POST') {
+      const body = await readJson(req);
+      if (!body.repoPath) return send(res, 400, { error: 'repoPath required' });
+      const result = state.hideRepo(body.repoPath);
+      if (!result.ok) return send(res, 400, { error: result.reason });
+      const repoPath = normalizeRepoPath(body.repoPath);
+      // Force any subscribed UI to re-pull the repo list (it'll be filtered out).
+      bus.publish({ type: 'repo', repoPath, basename: repoBasename(repoPath) });
+      return send(res, 200, { ok: true });
+    }
+
     // ---------- HEALTH ----------
     if (p === '/api/health' && method === 'GET') {
       return send(res, 200, { ok: true, ts: Date.now() });

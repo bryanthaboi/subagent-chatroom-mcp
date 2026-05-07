@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS repos (
   repo_path TEXT PRIMARY KEY,
   basename TEXT NOT NULL,
   first_seen INTEGER NOT NULL,
-  last_seen INTEGER NOT NULL
+  last_seen INTEGER NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS questions (
@@ -104,5 +105,7 @@ export function openDb(filename?: string): Db {
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA);
+  // Defensive migrations for older DBs that pre-date a column.
+  try { db.exec(`ALTER TABLE repos ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`); } catch {}
   return db;
 }

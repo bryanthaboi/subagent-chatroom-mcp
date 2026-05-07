@@ -6,7 +6,7 @@ function BuddyList({
   repos, agentsByRepo, observerName,
   onOpenChatForRepo, onOpenDM, onOpenChatPicker,
   onOpenFiles, onOpenLog, onOpenAbout,
-  onDelete,
+  onDelete, onHideRepo,
 }) {
   const totalOnline = Object.values(agentsByRepo).flat()
     .filter(a => a.status !== 'offline' && a.status !== 'away').length;
@@ -40,6 +40,7 @@ function BuddyList({
             onOpenChatForRepo={onOpenChatForRepo}
             onOpenDM={onOpenDM}
             onDelete={onDelete}
+            onHideRepo={onHideRepo}
           />
         ))}
       </div>
@@ -53,22 +54,55 @@ const STATUS_ORDER = {
   away: 2, offline: 3,
 };
 
-function RepoFolder({ repo, agents, onOpenChatForRepo, onOpenDM, onDelete }) {
+function RepoFolder({ repo, agents, onOpenChatForRepo, onOpenDM, onDelete, onHideRepo }) {
   const [open, setOpen] = React.useState(true);
+  const [menu, setMenu] = React.useState(null);
   const sorted = [...agents].sort((a, b) => (STATUS_ORDER[a.status] ?? 1) - (STATUS_ORDER[b.status] ?? 1));
   const live = sorted.filter(a => a.status !== 'offline' && a.status !== 'away').length;
+  // Repo can be hidden only if every agent in it is offline (no online, no away).
+  const canHide = sorted.length > 0 && sorted.every(a => a.status === 'offline');
+  React.useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [menu]);
   return (
     <>
       <div
         className="buddy-group"
         onDoubleClick={() => onOpenChatForRepo(repo.repoPath)}
-        title={`double-click to open #${repo.basename} chat`}
+        onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}
+        title={`double-click to open #${repo.basename} chat · right-click for options`}
       >
         <span className="caret" onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}>{open ? '▼' : '▶'}</span>
         <span style={{ marginRight: 4 }}>{Icon.folder}</span>
         <span><b>{repo.basename}</b></span>
         <span className="count">({live}/{sorted.length})</span>
       </div>
+      {menu && (
+        <div
+          style={{
+            position: 'fixed', left: menu.x, top: menu.y, zIndex: 99999,
+            background: '#fff', border: '1px solid #555', boxShadow: '2px 2px 0 #888',
+            padding: 2, fontSize: 12, minWidth: 160,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="ctx-item" style={{ padding: '4px 10px', cursor: 'pointer' }}
+               onClick={() => { onOpenChatForRepo(repo.repoPath); setMenu(null); }}>Open chat</div>
+          <div
+            className="ctx-item"
+            style={{
+              padding: '4px 10px',
+              cursor: canHide ? 'pointer' : 'not-allowed',
+              color: canHide ? '#a00' : '#999',
+            }}
+            title={canHide ? '' : 'all agents in this repo must be offline first'}
+            onClick={() => { if (canHide) { onHideRepo(repo); setMenu(null); } }}
+          >Hide repo{canHide ? '' : ' (agents online)'}</div>
+        </div>
+      )}
       {open && sorted.map((a) => (
         <BuddyRow key={a.id} agent={a} onOpenDM={onOpenDM} onDelete={onDelete} />
       ))}
