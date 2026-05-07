@@ -89,6 +89,12 @@ CREATE TABLE IF NOT EXISTS questions (
   answer_message_id TEXT
 );
 CREATE INDEX IF NOT EXISTS questions_status_sent ON questions(status, sent_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 export function defaultDbPath(): string {

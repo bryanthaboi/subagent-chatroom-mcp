@@ -13,7 +13,9 @@ import type {
   Question,
   QuestionStatus,
   InboxSummary,
+  Settings,
 } from '../shared/types.js';
+import { DEFAULT_SETTINGS } from '../shared/types.js';
 import { openDb, type Db } from './db.js';
 import { pickAwayMessage } from './lexicon.js';
 
@@ -220,6 +222,35 @@ export class State {
 
   close(): void {
     this.db.close();
+  }
+
+  // ---------- settings ----------
+  getAllSettings(): Settings {
+    const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    const out: Record<string, unknown> = { ...DEFAULT_SETTINGS };
+    for (const r of rows) {
+      if (r.key in out) {
+        try { out[r.key] = JSON.parse(r.value); } catch {}
+      }
+    }
+    return out as Settings;
+  }
+
+  getSetting<K extends keyof Settings>(key: K): Settings[K] {
+    return this.getAllSettings()[key];
+  }
+
+  setSettings(patch: Partial<Settings>): Settings {
+    const now = Date.now();
+    const stmt = this.db.prepare(
+      'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ' +
+      'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at'
+    );
+    const tx = this.db.transaction((entries: [string, unknown][]) => {
+      for (const [k, v] of entries) stmt.run(k, JSON.stringify(v), now);
+    });
+    tx(Object.entries(patch));
+    return this.getAllSettings();
   }
 
   // ---------- repos ----------
