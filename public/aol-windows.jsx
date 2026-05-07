@@ -449,4 +449,99 @@ function About({ port }) {
   );
 }
 
-window.AOL_WINDOWS = { BuddyList, ChatRoom, DMWindow, FileTargets, ActivityLog, About };
+// ===== Settings ==========================================================
+function Settings({ settings, themes, onChange }) {
+  const [externalDir, setExternalDir] = React.useState(settings['theme.externalDir'] || '');
+  React.useEffect(() => {
+    setExternalDir(settings['theme.externalDir'] || '');
+  }, [settings['theme.externalDir']]);
+
+  const valid = (themes || []).filter((t) => t.valid);
+  const invalid = (themes || []).filter((t) => !t.valid);
+  const grouped = {
+    bundled: valid.filter((t) => t.source === 'bundled'),
+    external: valid.filter((t) => t.source === 'external'),
+  };
+
+  return (
+    <div style={{ padding: 12, fontSize: 13, overflow: 'auto', flex: 1 }}>
+      <h3 style={{ margin: '0 0 6px' }}>Theme</h3>
+      <select
+        value={settings['theme.active']}
+        onChange={(e) => onChange({ 'theme.active': e.target.value })}
+        style={{ width: '100%', fontSize: 13, marginBottom: 4 }}
+      >
+        <optgroup label="Bundled">
+          {grouped.bundled.map((t) => (
+            <option key={'b:' + t.name} value={t.name}>
+              {t.manifest.displayName || t.name}
+              {t.manifest.extends ? ` (extends ${t.manifest.extends})` : ''}
+            </option>
+          ))}
+        </optgroup>
+        {grouped.external.length > 0 && (
+          <optgroup label="External">
+            {grouped.external.map((t) => (
+              <option key={'e:' + t.name} value={t.name}>
+                {t.manifest.displayName || t.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+      {invalid.length > 0 && (
+        <div style={{ fontSize: 11, color: '#a00', marginTop: 4 }}>
+          {invalid.length} invalid theme{invalid.length === 1 ? '' : 's'} hidden:
+          {invalid.map((t) => (
+            <div key={t.source + ':' + t.name}>· {t.name} ({t.source}): {t.invalidReason}</div>
+          ))}
+        </div>
+      )}
+      <p style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+        Switching theme reloads the page.
+      </p>
+
+      <h3 style={{ margin: '14px 0 6px' }}>External themes folder</h3>
+      <input
+        type="text"
+        value={externalDir}
+        onChange={(e) => setExternalDir(e.target.value)}
+        placeholder="/Users/you/aol-themes"
+        style={{ width: '100%', fontSize: 13 }}
+      />
+      <button
+        className="btn"
+        style={{ marginTop: 4 }}
+        onClick={() => onChange({ 'theme.externalDir': externalDir.trim() || null })}
+      >
+        Save folder
+      </button>
+      <p style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+        Any sub-folder containing a valid <code>theme.json</code> appears in the picker. Leave empty for bundled-only.
+        See <code>setting-up-theme-repo.md</code> in the repo root for managing this as a git repo.
+      </p>
+
+      <h3 style={{ margin: '14px 0 6px' }}>Audio</h3>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          type="checkbox"
+          checked={!!settings['audio.enabled']}
+          onChange={(e) => onChange({ 'audio.enabled': e.target.checked })}
+        />
+        Enable sound effects
+      </label>
+
+      <h3 style={{ margin: '14px 0 6px' }}>Debug</h3>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          type="checkbox"
+          checked={!!settings['debug.devlog']}
+          onChange={(e) => onChange({ 'debug.devlog': e.target.checked })}
+        />
+        Verbose console output (devlog)
+      </label>
+    </div>
+  );
+}
+
+window.AOL_WINDOWS = { BuddyList, ChatRoom, DMWindow, FileTargets, ActivityLog, About, Settings };
