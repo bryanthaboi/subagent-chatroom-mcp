@@ -140,6 +140,53 @@ export interface ResolveContext {
   defaultAudio: Record<string, string>;
 }
 
+export interface ThemesCache {
+  get(): DiscoveredTheme[];
+  invalidate(): void;
+}
+
+const TTL_MS = 30_000;
+
+export interface ThemesCacheDeps {
+  bundledDir: string;
+  getExternalDir: () => string | null;
+}
+
+export function makeThemesCache(deps: ThemesCacheDeps): ThemesCache {
+  let cache: { themes: DiscoveredTheme[]; scannedAt: number } | null = null;
+  let lastDir: string | null | undefined = undefined;
+  return {
+    get(): DiscoveredTheme[] {
+      const externalDir = deps.getExternalDir();
+      if (cache && externalDir === lastDir && Date.now() - cache.scannedAt < TTL_MS) {
+        return cache.themes;
+      }
+      const themes = scanThemes({ bundledDir: deps.bundledDir, externalDir });
+      cache = { themes, scannedAt: Date.now() };
+      lastDir = externalDir;
+      return themes;
+    },
+    invalidate(): void {
+      cache = null;
+    },
+  };
+}
+
+export function makeResolveContext(): ResolveContext {
+  return {
+    publicBundledUrlBase: '/themes/bundled',
+    publicExternalUrlBase: '/themes/external',
+    fallbackShellUrl: '/fallback-shell.jsx',
+    defaultAudio: {
+      signon: '/themes/bundled/aol/assets/dooropen.wav',
+      signoff: '/themes/bundled/aol/assets/doorslam.wav',
+      imRecv: '/themes/bundled/aol/assets/imrcv.wav',
+      imSend: '/themes/bundled/aol/assets/imsend.wav',
+      welcome: '/themes/bundled/aol/assets/welcome.wav',
+    },
+  };
+}
+
 function urlBase(t: DiscoveredTheme, ctx: ResolveContext): string {
   return (t.source === 'bundled' ? ctx.publicBundledUrlBase : ctx.publicExternalUrlBase) + '/' + t.name;
 }

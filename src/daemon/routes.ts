@@ -5,6 +5,7 @@ import { normalizeRepoPath, repoBasename, validateAgentMessage } from './state.j
 import type { ClaimMode, BroadcastEvent } from '../shared/types.js';
 import { startQuestion, onMessageMaybeAnswer } from './questions.js';
 import { suggestScreenNames } from './lexicon.js';
+import { resolveTheme, type ThemesCache, type ResolveContext } from './themes.js';
 
 type Json = unknown;
 
@@ -48,7 +49,9 @@ export async function handleApi(
   res: ServerResponse,
   url: URL,
   state: State,
-  bus: Bus
+  bus: Bus,
+  themesCache: ThemesCache,
+  resolveCtx: ResolveContext
 ): Promise<void> {
   const method = req.method ?? 'GET';
   const p = url.pathname;
@@ -438,8 +441,21 @@ export async function handleApi(
         }
       }
       const next = state.setSettings(body);
+      if ('theme.externalDir' in body) themesCache.invalidate();
       bus.publish({ type: 'settings', settings: next });
       return send(res, 200, next);
+    }
+
+    // ---------- THEMES ----------
+    if (p === '/api/themes' && method === 'GET') {
+      const themes = themesCache.get();
+      return send(res, 200, { themes, warnings: [] });
+    }
+    if (p.startsWith('/api/themes/') && p.endsWith('/resolved') && method === 'GET') {
+      const name = decodeURIComponent(p.slice('/api/themes/'.length, -('/resolved'.length)));
+      const themes = themesCache.get();
+      const resolved = resolveTheme(name, themes, resolveCtx);
+      return send(res, 200, resolved);
     }
 
     return send(res, 404, { error: 'not found', path: p });
