@@ -116,6 +116,7 @@ export type BroadcastEvent =
   | { type: 'message'; repoPath: string; message: Message }
   | { type: 'activity'; repoPath: string; event: ActivityEvent }
   | { type: 'repo'; repoPath: string; basename: string }
+  | { type: 'settings'; settings: Settings }
   | { type: 'hello'; serverTime: number };
 
 export interface ConflictDetail {
@@ -123,4 +124,63 @@ export interface ConflictDetail {
   holder: { agentId: string; agentName: string; mode: ClaimMode; reason: string; startedAt: number };
   claimId: string;
   queuePosition: number;
+}
+
+// ---------- Settings ----------
+
+export interface Settings {
+  'theme.active': string;
+  'theme.externalDir': string | null;
+  'audio.enabled': boolean;
+  'debug.devlog': boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  'theme.active': 'aol',
+  'theme.externalDir': null,
+  'audio.enabled': true,
+  'debug.devlog': false,
+};
+
+// ---------- Themes ----------
+
+export const THEME_COMPAT_VERSION = 1;
+
+export type ThemeSource = 'bundled' | 'external';
+
+export interface ThemeManifest {
+  name: string;
+  displayName: string;
+  version: string;
+  author?: string;
+  description?: string;
+  extends: string | null;
+  layout: 'multiwindow' | 'singlewindow';
+  css: string;
+  shell?: string;
+  assets?: string;
+  audio?: Record<string, string>;
+  compatVersion: number;
+}
+
+export interface DiscoveredTheme {
+  name: string;
+  source: ThemeSource;
+  dir: string;
+  manifest: ThemeManifest;
+  valid: boolean;
+  invalidReason?: string;
+}
+
+export interface ResolvedTheme {
+  active: {
+    name: string;
+    source: ThemeSource;
+    cssUrls: string[];
+    shellUrl: string;
+    audio: Record<string, string>;
+    manifest: ThemeManifest;
+  };
+  base: { name: string; source: ThemeSource } | null;
+  warnings: string[];
 }

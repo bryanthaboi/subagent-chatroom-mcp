@@ -449,7 +449,7 @@ export function handleSse(
   };
   write({ type: 'hello', serverTime: Date.now() });
   const onEvent = (ev: BroadcastEvent): void => {
-    if (!repoPath || ev.type === 'hello' || ev.type === 'repo' || ev.repoPath === normalizeRepoPath(repoPath)) {
+    if (!repoPath || ev.type === 'hello' || ev.type === 'repo' || ev.type === 'settings' || ev.repoPath === normalizeRepoPath(repoPath)) {
       write(ev);
     }
   };
