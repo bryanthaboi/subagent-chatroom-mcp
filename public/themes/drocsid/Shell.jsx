@@ -31,13 +31,23 @@ function Shell(props) {
   const {
     observer, repos, agentsByRepo, claims, activity, messagesByRepo, dms,
     settings, themes,
-    sendRoom, sendDM, openChatForRepo, loadDM,
+    sendRoom, sendDM, openChatForRepo, loadDM, hideRepo,
     setSettings,
     errorBanner, dismissError,
   } = props;
 
   // active selection: a repoPath, or '__friends', '__activity', '__claims', '__settings', or 'dm:<agentId>'
   const [active, setActive] = React.useState(() => repos[0]?.repoPath ?? '__friends');
+  const [repoMenu, setRepoMenu] = React.useState(null); // { x, y, repo } | null
+
+  // Close the menu on any click anywhere. (Don't close on contextmenu — the
+  // same right-click that opened the menu would otherwise close it.)
+  React.useEffect(() => {
+    if (!repoMenu) return;
+    const close = () => setRepoMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [repoMenu]);
 
   // Hydrate the active repo's messages on selection change. Stable sentinels
   // (__friends, __activity, ...) skip hydration.
@@ -97,6 +107,10 @@ function Shell(props) {
         agentsByRepo={agentsByRepo}
         observer={observer}
         settings={settings}
+        onRepoContextMenu={(e, repo) => {
+          e.preventDefault();
+          setRepoMenu({ x: e.clientX, y: e.clientY, repo });
+        }}
       />
       <Main
         active={active}
@@ -123,11 +137,59 @@ function Shell(props) {
           onOpenDM={(agent) => setActive('dm:' + agent.id)}
         />
       )}
+      {repoMenu && (
+        <RepoContextMenu
+          x={repoMenu.x}
+          y={repoMenu.y}
+          repo={repoMenu.repo}
+          agents={agentsByRepo[repoMenu.repo.repoPath] || []}
+          onOpenChat={() => { setActive(repoMenu.repo.repoPath); setRepoMenu(null); }}
+          onHide={() => { hideRepo(repoMenu.repo); setRepoMenu(null); }}
+        />
+      )}
       {errorBanner && (
         <div className="ds-error-banner" onClick={dismissError}>
           {errorBanner} (click to dismiss)
         </div>
       )}
+    </div>
+  );
+}
+
+function RepoContextMenu({ x, y, repo, agents, onOpenChat, onHide }) {
+  const canHide = agents.length === 0 || agents.every((a) => a.status === 'offline');
+  return (
+    <div
+      style={{
+        position: 'fixed', left: x, top: y, zIndex: 99999,
+        background: 'var(--bg-side)',
+        border: '1px solid var(--line)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+        borderRadius: 4,
+        padding: 4, minWidth: 180,
+        color: 'var(--text)',
+        fontSize: 13,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        style={{ padding: '6px 10px', cursor: 'pointer', borderRadius: 3 }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        onClick={onOpenChat}
+      >Open chat</div>
+      <div
+        style={{
+          padding: '6px 10px',
+          cursor: canHide ? 'pointer' : 'not-allowed',
+          color: canHide ? 'var(--red)' : 'var(--text-mute)',
+          borderRadius: 3,
+        }}
+        title={canHide ? '' : 'all agents in this repo must be offline first'}
+        onMouseEnter={(e) => { if (canHide) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        onClick={() => { if (canHide) onHide(); }}
+      >Hide repo{canHide ? '' : ' (agents online)'}</div>
     </div>
   );
 }
@@ -165,7 +227,7 @@ function Rail({ active, onPickFriends, onPickServer, onPickActivity, onPickClaim
   );
 }
 
-function Sidebar({ active, onPick, repos, agentsByRepo, observer, settings }) {
+function Sidebar({ active, onPick, repos, agentsByRepo, observer, settings, onRepoContextMenu }) {
   // DM home view: list all repos' agents (deduped) so the user can DM anyone.
   if (active === '__friends' || active.startsWith('dm:')) {
     const allAgents = [];
@@ -223,7 +285,9 @@ function Sidebar({ active, onPick, repos, agentsByRepo, observer, settings }) {
           return (
             <div key={r.repoPath}
                  className={`ds-channel-row ${active === r.repoPath ? 'active' : ''}`}
-                 onClick={() => onPick(r.repoPath)}>
+                 onClick={() => onPick(r.repoPath)}
+                 onContextMenu={(e) => onRepoContextMenu && onRepoContextMenu(e, r)}
+                 title="right-click for options">
               <span className="hash">#</span>
               <span className="name">{r.basename}</span>
               {liveCount > 0 && <span style={{ fontSize: 11, color: 'var(--text-mute)' }}>{liveCount}</span>}

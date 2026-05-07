@@ -114,7 +114,7 @@ function Shell(props) {
   const {
     observer, repos, agentsByRepo, claims, activity, messagesByRepo, dms,
     settings, themes,
-    sendRoom, sendDM, openChatForRepo, loadDM,
+    sendRoom, sendDM, openChatForRepo, loadDM, hideRepo,
     setSettings,
     errorBanner, dismissError,
   } = props;
@@ -123,6 +123,16 @@ function Shell(props) {
   const [active, setActive] = React.useState(() => repos[0]?.repoPath ?? '__friends');
   // Rail section ('home', 'dms', 'activity', 'files', 'settings').
   const [section, setSection] = React.useState('home');
+  const [repoMenu, setRepoMenu] = React.useState(null); // { x, y, repo } | null
+
+  // Close the menu on any click anywhere. (Don't close on contextmenu — the
+  // same right-click that opened the menu would otherwise close it.)
+  React.useEffect(() => {
+    if (!repoMenu) return;
+    const close = () => setRepoMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [repoMenu]);
 
   React.useEffect(() => {
     if (active.startsWith('__')) return;
@@ -178,6 +188,10 @@ function Shell(props) {
           onPick={setActive}
           repos={repos}
           agentsByRepo={agentsByRepo}
+          onRepoContextMenu={(e, repo) => {
+            e.preventDefault();
+            setRepoMenu({ x: e.clientX, y: e.clientY, repo });
+          }}
         />
         <Main
           active={active}
@@ -197,12 +211,60 @@ function Shell(props) {
           onOpenDM={(agent) => setActive('dm:' + agent.id)}
         />
       </WindowFrame>
+      {repoMenu && (
+        <RepoContextMenu
+          x={repoMenu.x}
+          y={repoMenu.y}
+          repo={repoMenu.repo}
+          agents={agentsByRepo[repoMenu.repo.repoPath] || []}
+          onOpenChat={() => { setActive(repoMenu.repo.repoPath); setRepoMenu(null); }}
+          onHide={() => { hideRepo(repoMenu.repo); setRepoMenu(null); }}
+        />
+      )}
       {errorBanner && (
         <div className="kc-error-banner" onClick={dismissError}>
           {errorBanner} (click to dismiss)
         </div>
       )}
     </>
+  );
+}
+
+function RepoContextMenu({ x, y, repo, agents, onOpenChat, onHide }) {
+  const canHide = agents.length === 0 || agents.every((a) => a.status === 'offline');
+  return (
+    <div
+      style={{
+        position: 'fixed', left: x, top: y, zIndex: 99999,
+        background: 'var(--kc-side-bg)',
+        border: '1px solid var(--kc-line)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+        borderRadius: 6,
+        padding: 4, minWidth: 180,
+        color: 'var(--kc-text)',
+        fontSize: 13,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        style={{ padding: '6px 10px', cursor: 'pointer', borderRadius: 3 }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--kc-hover)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        onClick={onOpenChat}
+      >Open chat</div>
+      <div
+        style={{
+          padding: '6px 10px',
+          cursor: canHide ? 'pointer' : 'not-allowed',
+          color: canHide ? 'var(--kc-red)' : 'var(--kc-text-mute)',
+          borderRadius: 3,
+        }}
+        title={canHide ? '' : 'all agents in this repo must be offline first'}
+        onMouseEnter={(e) => { if (canHide) e.currentTarget.style.background = 'var(--kc-hover)'; }}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        onClick={() => { if (canHide) onHide(); }}
+      >Hide repo{canHide ? '' : ' (agents online)'}</div>
+    </div>
   );
 }
 
@@ -237,7 +299,7 @@ function NavRail({ section, onSection, observer }) {
   );
 }
 
-function Sidebar({ active, onPick, repos, agentsByRepo }) {
+function Sidebar({ active, onPick, repos, agentsByRepo, onRepoContextMenu }) {
   const [showChannels, setShowChannels] = React.useState(true);
   const [showDms, setShowDms] = React.useState(true);
 
@@ -277,7 +339,9 @@ function Sidebar({ active, onPick, repos, agentsByRepo }) {
         {showChannels && repos.map((r) => (
           <button key={r.repoPath}
                   className={`kc-chan-row ${active === r.repoPath ? 'active' : ''}`}
-                  onClick={() => onPick(r.repoPath)}>
+                  onClick={() => onPick(r.repoPath)}
+                  onContextMenu={(e) => onRepoContextMenu && onRepoContextMenu(e, r)}
+                  title="right-click for options">
             <span className="icn">#</span>
             <span className="name">{r.basename}</span>
           </button>
