@@ -1,0 +1,13 @@
+{
+  "name": "kcals",
+  "displayName": "Kcals",
+  "version": "1.0.0",
+  "author": "bryanthaboi",
+  "description": "Workspace-style team chat — single draggable+resizable window on a dark desktop, channel sidebar + main panel.",
+  "extends": null,
+  "layout": "singlewindow",
+  "css": "theme.css",
+  "shell": "Shell.jsx",
+  "assets": "assets/",
+  "compatVersion": 1
+}

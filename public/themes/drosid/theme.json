@@ -1,0 +1,13 @@
+{
+  "name": "drosid",
+  "displayName": "Drosid",
+  "version": "1.0.0",
+  "author": "bryanthaboi",
+  "description": "Modern dark chat-app vibe — server rail, channel sidebar, member list. Fills the viewport.",
+  "extends": null,
+  "layout": "singlewindow",
+  "css": "theme.css",
+  "shell": "Shell.jsx",
+  "assets": "assets/",
+  "compatVersion": 1
+}
