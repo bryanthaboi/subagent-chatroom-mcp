@@ -1,9 +1,29 @@
 /* global React, ReactDOM */
 
+// === Devlog ==============================================================
+// Gated on window.AOL_DEBUG.enabled (set by theme-loader from settings).
+// Keep it cheap-when-off so we can scatter calls without performance worry.
+window.AOL_DEBUG = window.AOL_DEBUG || { enabled: false };
+function devlog(category, ...args) {
+  if (!window.AOL_DEBUG.enabled) return;
+  console.log(`[${category}]`, ...args);
+}
+
 // === Audio (synthesized retro chimes + sampled .wav cues) ================
+// Sample paths are read from a runtime map populated by theme-loader from
+// the resolved theme's audio config. Defaults below match the bundled aol
+// theme so the app can render usefully even before the loader runs.
 const AudioFx = (() => {
   let ctx = null;
   let enabled = true;
+  let audioMap = {
+    signon:  '/themes/bundled/aol/assets/dooropen.wav',
+    signoff: '/themes/bundled/aol/assets/doorslam.wav',
+    welcome: '/themes/bundled/aol/assets/welcome.wav',
+    imRecv:  '/themes/bundled/aol/assets/imrcv.wav',
+    imSend:  '/themes/bundled/aol/assets/imsend.wav',
+  };
+  let samples = {};
   const ensure = () => {
     if (!ctx) {
       try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
@@ -23,17 +43,14 @@ const AudioFx = (() => {
     osc.connect(g); g.connect(c.destination);
     osc.start(t0); osc.stop(t0 + dur + 0.02);
   };
-  // Pre-cache <audio> elements per sample so rapid events don't restart from scratch.
-  const samples = {};
   const sample = (name) => {
-    if (!enabled) return;
+    if (!enabled || !name) return;
     if (!samples[name]) {
       const a = new Audio(name);
       a.preload = 'auto';
       samples[name] = a;
     }
     try {
-      // clone so overlapping events don't cut each other off
       const node = samples[name].cloneNode();
       node.volume = 0.9;
       node.play().catch(() => {});
@@ -42,12 +59,13 @@ const AudioFx = (() => {
   return {
     setEnabled(v) { enabled = v; },
     isEnabled() { return enabled; },
+    setAudioMap(map) { audioMap = { ...audioMap, ...(map || {}) }; samples = {}; },
     // Sampled cues per request
-    signon()   { sample('dooropen.wav'); },
-    signoff()  { sample('doorslam.wav'); },
-    welcome()  { sample('welcome.wav'); },
-    imRecv()   { sample('imrcv.wav'); },
-    imSend()   { sample('imsend.wav'); },
+    signon()   { sample(audioMap.signon); },
+    signoff()  { sample(audioMap.signoff); },
+    welcome()  { sample(audioMap.welcome); },
+    imRecv()   { sample(audioMap.imRecv); },
+    imSend()   { sample(audioMap.imSend); },
     // Synthesized fallbacks for everything else (claim/release/wait/etc.)
     knock()        { tone(740, 0.06, 'square', 0); tone(740, 0.06, 'square', 0.12); },
     workStart()    { tone(523, 0.08, 'square', 0); tone(784, 0.1, 'square', 0.09); },
@@ -86,6 +104,10 @@ const AolNet = (() => {
   };
   return {
     listRepos() { return j('GET', '/api/repos'); },
+    getSettings() { return j('GET', '/api/settings'); },
+    setSettings(patch) { return j('POST', '/api/settings', patch); },
+    listThemes() { return j('GET', '/api/themes'); },
+    getResolvedTheme(name) { return j('GET', '/api/themes/' + encodeURIComponent(name) + '/resolved'); },
     listAgents(repoPath) {
       const qs = repoPath ? '?repoPath=' + encodeURIComponent(repoPath) : '';
       return j('GET', '/api/agents' + qs);
@@ -321,4 +343,5 @@ const Icon = {
 window.AOL_DATA = {
   AudioFx, Win, Icon, AolNet,
   STATUS_COLORS, colorForName, avatarLetter, basename, tsHM, tsHMS, relTime,
+  devlog,
 };
