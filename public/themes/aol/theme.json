@@ -1,0 +1,20 @@
+{
+  "name": "aol",
+  "displayName": "AOL Classic",
+  "version": "1.0.0",
+  "author": "bryanthaboi",
+  "description": "Late-90s desktop messenger. Multi-window, gray-bevel, yellow accents.",
+  "extends": null,
+  "layout": "multiwindow",
+  "css": "theme.css",
+  "shell": "Shell.jsx",
+  "assets": "assets/",
+  "audio": {
+    "signon":  "assets/dooropen.wav",
+    "signoff": "assets/doorslam.wav",
+    "imRecv":  "assets/imrcv.wav",
+    "imSend":  "assets/imsend.wav",
+    "welcome": "assets/welcome.wav"
+  },
+  "compatVersion": 1
+}
