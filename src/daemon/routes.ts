@@ -425,6 +425,23 @@ export async function handleApi(
       return send(res, 200, { names: suggestScreenNames(count, taken) });
     }
 
+    // ---------- SETTINGS ----------
+    if (p === '/api/settings' && method === 'GET') {
+      return send(res, 200, state.getAllSettings());
+    }
+    if (p === '/api/settings' && method === 'POST') {
+      const body = await readJson(req);
+      const KNOWN = ['theme.active', 'theme.externalDir', 'audio.enabled', 'debug.devlog'] as const;
+      for (const k of Object.keys(body)) {
+        if (!(KNOWN as readonly string[]).includes(k)) {
+          return send(res, 400, { error: `unknown setting key: ${k}` });
+        }
+      }
+      const next = state.setSettings(body);
+      bus.publish({ type: 'settings', settings: next });
+      return send(res, 200, next);
+    }
+
     return send(res, 404, { error: 'not found', path: p });
   } catch (e: any) {
     return send(res, 500, { error: e?.message ?? String(e) });
